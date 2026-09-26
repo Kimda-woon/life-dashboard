@@ -67,6 +67,7 @@
       y10: '', y5: '', y1: '',
       why: { y10: '', y5: '', y1: '' },          // 목표마다 목적(왜)
       peaks: { y10: [], y5: [], y1: [] },         // 작은 산(이정표)
+      checkins: [],                               // 한 달 점검 [{month, score, note, y1, y5, y10}]
       goals: [],
       quarter: { key: '', text: '', prev: '' },
       month: { key: '', text: '', prev: '' },
@@ -163,6 +164,36 @@
   const currentPeak = (h) => (state.vision.peaks[h] || []).find((pk) => !pk.done);
   const ym = (s) => (s ? `${s.slice(0, 4)}.${s.slice(5, 7)}` : '');
 
+  // 숫자로 재는 작은 산: 돈 기록과 자동 연결되거나 직접 적음
+  const METRICS = {
+    '': '숫자 없이',
+    debt: '빚 갚기 (돈 탭에서 자동)',
+    income_month: '이번 달 수입 (자동)',
+    income_total: '이 산을 만든 뒤 번 돈 합계 (자동)',
+    manual: '직접 적기 (예: 수강생 수)',
+  };
+  function metricValue(pk) {
+    const m = pk.metric;
+    if (!m || !m.type) return null;
+    if (m.type === 'debt') return { cur: debtPaid(), target: num(state.debt.start), money: true, label: '갚은 빚' };
+    if (m.type === 'income_month') { const mk = monthKey(); return { cur: sum(state.incomes.filter((i) => monthKey(i.date) === mk)), target: num(m.target), money: true, label: '이번 달 수입' }; }
+    if (m.type === 'income_total') return { cur: sum(state.incomes.filter((i) => i.date >= (m.since || '0000'))), target: num(m.target), money: true, label: '모은 수입' };
+    return { cur: num(m.current), target: num(m.target), money: false, unit: m.unit || '', label: '지금' };
+  }
+  const fmtMetric = (v, n) => (v.money ? man(n) : `${n.toLocaleString('ko-KR')}${v.unit}`);
+  const peakPct = (h) => { const l = state.vision.peaks[h] || []; return l.length ? Math.round((l.filter((x) => x.done).length / l.length) * 100) : null; };
+  const latePeaks = () => allPeaks().filter((pk) => !pk.done && pk.due && pk.due < today().slice(0, 7));
+  const addMonths = (ymStr, n) => { const [y, m] = ymStr.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+  // 점검할 달: 월말 3일 전부터는 이번 달, 새 달 첫 5일은 지난달
+  function checkMonth() {
+    const d = new Date();
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    if (d.getDate() >= last - 2) return monthKey();
+    if (d.getDate() <= 5) return addMonths(monthKey(), -1);
+    return null;
+  }
+  const checkinFor = (mk) => (state.vision.checkins || []).find((c) => c.month === mk);
+
   // 🏁━✅━🚶━○━🏔️ 산길 그림
   function trail(list) {
     if (!list.length) return '';
@@ -173,6 +204,90 @@
       return `<span class="tr-seg"></span><span class="tr-dot ${cls}" title="${esc(pk.text)}">${icon}</span>`;
     }).join('');
     return `<div class="trail" aria-hidden="true"><span class="tr-end">🏁</span>${dots}<span class="tr-seg"></span><span class="tr-end">🏔️</span></div>`;
+  }
+
+  function metricBlock(pk) {
+    const v = metricValue(pk);
+    const m = pk.metric || {};
+    const pct = v && v.target > 0 ? Math.min(100, Math.round((v.cur / v.target) * 100)) : null;
+    const show = v ? `<div class="metric">
+        <div class="row between"><span class="small">📊 ${v.label} <b>${fmtMetric(v, v.cur)}</b>${v.target ? ` / ${fmtMetric(v, v.target)}` : ''}</span>${pct !== null ? `<b class="small">${pct}%</b>` : ''}</div>
+        ${pct !== null ? `<div class="bar thin" style="margin-top:4px"><i style="width:${pct}%"></i></div>` : '<p class="hint">목표 숫자를 적어 주세요.</p>'}
+        ${pct === 100 && !pk.done ? `<button class="btn sm" style="margin-top:6px" data-act="peak-toggle" data-id="${pk.id}">🎉 목표 숫자 도달! 넘었다고 체크</button>` : ''}
+      </div>` : '';
+    if (pk.done) return show;
+    return `${show}<details class="metric-set" data-peak-details="${pk.id}" ${openMetric === pk.id || (m.type && !(v && v.target) && m.type !== 'debt') ? 'open' : ''}><summary>📊 숫자로 재기${m.type ? ' · 바꾸기' : ''}</summary>
+      <select data-peak="${pk.id}" data-field="metric.type">${Object.entries(METRICS).map(([k, l]) => `<option value="${k}" ${(m.type || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      ${m.type && m.type !== 'debt' ? `<div class="row" style="margin-top:6px">
+        ${m.type === 'manual' ? `<input data-peak="${pk.id}" data-field="metric.current" value="${esc(m.current ?? '')}" inputmode="decimal" placeholder="지금 (예: 35)" style="flex:1;min-width:90px">` : ''}
+        <input data-peak="${pk.id}" data-field="metric.target" value="${m.target ? (m.type === 'manual' ? m.target : num(m.target).toLocaleString('ko-KR')) : ''}" placeholder="${m.type === 'manual' ? '목표 (예: 100)' : '목표 금액 (예: 300만)'}" ${m.type === 'manual' ? 'inputmode="decimal"' : 'enterkeyhint="done"'} style="flex:1;min-width:110px">
+        ${m.type === 'manual' ? `<input data-peak="${pk.id}" data-field="metric.unit" value="${esc(m.unit || '')}" placeholder="단위 (명)" style="width:84px;flex:none">` : ''}
+      </div>` : ''}
+      ${m.type === 'debt' ? '<p class="hint">돈 탭의 빚 챌린지 기록으로 자동 계산돼요.</p>' : ''}
+    </details>`;
+  }
+
+  /* ---------- 📈 한 달 점검 ---------- */
+  const SCORES = [[0, '제자리'], [25, '조금'], [50, '절반쯤'], [75, '많이'], [100, '훌쩍']];
+  let ckDraft = null;   // 점검 입력 중인 값
+  let openMetric = null; // 숫자 설정을 펼쳐 둔 작은 산
+  let ckPick = null;    // 그래프에서 고른 달
+
+  function checkinChart(list) {
+    const W = 320, H = 170, L = 30, R = 10, T = 12, B = 24;
+    const n = list.length;
+    const band = (W - L - R) / n;
+    const bw = Math.min(22, band * 0.5);
+    const y = (v) => T + (1 - v / 100) * (H - T - B);
+    const base = y(0);
+    const grid = [0, 50, 100].map((g) => `<line x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}" class="ck-grid"/><text x="${L - 6}" y="${y(g) + 4}" class="ck-axis" text-anchor="end">${g}</text>`).join('');
+    const bars = list.map((c, i) => {
+      const x = L + band * i + (band - bw) / 2;
+      const top = y(c.score);
+      const r = Math.min(4, base - top);
+      return r > 0.5 ? `<path class="ck-bar" d="M${x},${base}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${base}Z"/>` : `<rect class="ck-bar" x="${x}" y="${base - 1}" width="${bw}" height="1"/>`;
+    }).join('');
+    const pts = list.map((c, i) => (c.y1 == null ? null : [L + band * i + band / 2, y(c.y1), c.y1])).filter(Boolean);
+    const line = pts.length > 1 ? `<polyline class="ck-line" points="${pts.map((q) => `${q[0]},${q[1]}`).join(' ')}"/>` : '';
+    const dots = pts.map((q) => `<circle class="ck-dot" cx="${q[0]}" cy="${q[1]}" r="4"/>`).join('');
+    const last = pts[pts.length - 1];
+    const lastLabel = last ? `<text x="${Math.min(last[0] + 6, W - R)}" y="${Math.max(last[1] - 8, T + 8)}" class="ck-label" text-anchor="${last[0] + 30 > W ? 'end' : 'start'}">${last[2]}%</text>` : '';
+    const every = n > 6 ? 2 : 1;
+    const xl = list.map((c, i) => ((n - 1 - i) % every === 0 ? `<text x="${L + band * i + band / 2}" y="${H - 6}" class="ck-axis" text-anchor="middle">${Number(c.month.slice(5))}월</text>` : '')).join('');
+    const hits = list.map((c, i) => `<rect class="ck-hit ${ckPick === i ? 'on' : ''}" x="${L + band * i}" y="${T}" width="${band}" height="${H - T - B}" data-act="ck-pick" data-i="${i}"><title>${Number(c.month.slice(5))}월 · 체감 ${c.score} · 1년 진행 ${c.y1 ?? '-'}%</title></rect>`).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" class="ck-chart" role="img" aria-label="한 달 점검 그래프">${grid}${bars}${line}${dots}${lastLabel}${xl}${hits}</svg>`;
+  }
+
+  function checkinCard() {
+    const cm = checkMonth() || monthKey();
+    const done = checkinFor(cm);
+    const list = [...(state.vision.checkins || [])].sort((a, b) => a.month.localeCompare(b.month)).slice(-12);
+    const editing = !!ckDraft;
+    const mLabel = `${Number(cm.slice(5))}월`;
+    let form;
+    if (editing) {
+      form = `<p style="font-weight:700;margin-top:4px">${mLabel}에 산을 얼마나 올랐다고 느끼나요?</p>
+        <div class="ck-scores">${SCORES.map(([v, l]) => `<button class="chip ${ckDraft.score === v ? 'on' : ''}" data-act="ck-score" data-v="${v}">${l}<small>${v}</small></button>`).join('')}</div>
+        <input id="ck-note" value="${esc(ckDraft.note)}" placeholder="한 줄 기록 (예: 첫 워크숍 공지 올림)" autocomplete="off" style="margin-top:8px">
+        <div class="row" style="margin-top:8px"><button class="btn primary" data-act="ck-save" ${ckDraft.score == null ? 'disabled' : ''}>점검 저장</button><button class="btn ghost" data-act="ck-cancel">취소</button></div>
+        <p class="hint">저장하면 지금 1년·5년·10년 작은 산 진행률도 함께 기록돼요.</p>`;
+    } else if (done) {
+      form = `<div class="row between"><p>✓ <b>${mLabel} 점검 완료</b> · 체감 ${SCORES.find(([v]) => v === done.score)?.[1] || done.score}</p><button class="btn sm" data-act="ck-edit">고치기</button></div>`;
+    } else {
+      form = `<button class="btn primary block" data-act="ck-edit">📈 ${mLabel} 점검하기</button>`;
+    }
+    const pick = list.length ? list[ckPick != null && list[ckPick] ? ckPick : list.length - 1] : null;
+    return `<section class="card" id="checkin">
+      <div class="card-head"><h2>📈 한 달 점검</h2><span class="muted">${list.length}달 기록</span></div>
+      ${form}
+      ${list.length ? `<div class="ck-legend"><span><i class="sw-bar"></i>체감 오름 (0~100)</span><span><i class="sw-dot"></i>1년 작은 산 진행률 %</span></div>
+        ${checkinChart(list)}
+        <p class="ck-detail">${pick ? `<b>${pick.month.slice(0, 4)}년 ${Number(pick.month.slice(5))}월</b> · 체감 ${pick.score} · 1년 ${pick.y1 ?? '-'}% · 5년 ${pick.y5 ?? '-'}%${pick.note ? `<br>📝 ${esc(pick.note)}` : ''}` : ''}</p>
+        <details><summary class="muted small">표로 보기</summary>
+          <table class="ck-table"><thead><tr><th>달</th><th>체감</th><th>1년</th><th>5년</th><th>10년</th><th>기록</th></tr></thead><tbody>
+          ${[...list].reverse().map((c) => `<tr><td>${ym(c.month)}</td><td>${c.score}</td><td>${c.y1 ?? '-'}%</td><td>${c.y5 ?? '-'}%</td><td>${c.y10 ?? '-'}%</td><td>${esc(c.note)}</td></tr>`).join('')}
+          </tbody></table></details>` : '<p class="hint">매달 말에 한 번씩 점검하면, 막대(체감)와 선(실제 진행률)으로 내가 오른 길이 쌓여요.</p>'}
+    </section>`;
   }
 
   function peaksBlock(h) {
@@ -194,6 +309,7 @@
           ${cur && pk.id === cur.id ? '<span class="tag here-tag">🚶 지금 여기</span>' : ''}
           ${pk.done ? `<span class="tag done-tag">✓ ${ym(pk.doneDate)} 넘음</span>` : `<label class="due ${late(pk) ? 'late' : ''}">목표 <input type="month" data-peak="${pk.id}" data-field="due" value="${esc(pk.due || '')}"></label>`}
         </div>
+        ${metricBlock(pk)}
         ${pk.done ? '' : `<div class="peak-next">
           <input data-peak="${pk.id}" data-field="next" value="${esc(pk.next || '')}" placeholder="다음 한 걸음 (예: 워크숍 소개글 쓰기)" autocomplete="off">
           <button class="btn sm" data-act="peak-today" data-id="${pk.id}">📌 오늘 할 일로</button>
@@ -270,6 +386,7 @@
         <ol class="steps">${steps.map((s, i) => `<li class="${s.ok ? 'ok' : ''}"><span class="dot">${s.ok ? '✓' : i + 1}</span><span class="grow">${s.text}</span>${s.ok ? '' : `<button class="btn sm" data-act="go" data-to="${s.to}">하기</button>`}</li>`).join('')}</ol>
       </section>` : ''}
 
+      ${checkMonth() && !checkinFor(checkMonth()) && allPeaks().length ? `<section class="card accent"><div class="row between"><div><h2>📈 ${Number(checkMonth().slice(5))}월 점검할 때예요</h2><p class="muted">한 달 동안 산을 얼마나 올랐는지 1분만.</p></div><button class="btn primary sm" data-act="go-checkin">점검하기</button></div></section>` : ''}
       ${now.getDay() === 0 ? `<section class="card accent"><div class="row between"><div><h2>📝 오늘은 주간 리뷰 날</h2><p class="muted">5분만 써도 다음 주가 달라져요.</p></div><button class="btn primary sm" data-act="go" data-to="review">리뷰하기</button></div></section>` : ''}
 
       ${(goals.length || weekItems.length || currentPeak('y1')) ? `<section class="card compass">
@@ -436,6 +553,8 @@
           : '<p class="muted small" style="margin-top:6px">아래 10년·5년·1년 칸에 작은 산을 적고, 넘을 때마다 체크하세요. 넘은 산이 여기에 쌓여요.</p>'}
       </section>
 
+      ${checkinCard()}
+
       ${horizon('y10', 'h10', '10년 후 · ' + (Number(t.slice(0, 4)) + 10), '어디에 살고, 무슨 일을 하고, 누구와 하루를 보내나요? 이루고 싶은 모습을 편하게 적어 보세요.')}
       <div class="down">↓ 그러려면 5년 뒤엔</div>
       ${horizon('y5', 'h5', '5년 후 · ' + (Number(t.slice(0, 4)) + 5), '어떤 사업·작품·수입 구조가 자리 잡혀 있어야 할까요?')}
@@ -509,6 +628,20 @@
         </div>
       </section>
 
+      ${latePeaks().length ? `<section class="card late-card">
+        <div class="card-head"><h2>⏰ 늦어진 작은 산</h2><span class="muted">${latePeaks().length}개</span></div>
+        <p class="muted small">목표 달이 지났어요. 괜찮아요, 날짜를 다시 잡거나 넘었으면 체크해요.</p>
+        ${latePeaks().map((pk) => `<div class="late-item">
+          <div><b>${esc(pk.text)}</b> <span class="tag">${pk.hLabel}</span><div class="muted small">목표였던 달 ${ym(pk.due)}</div></div>
+          <div class="row" style="margin-top:6px">
+            <button class="btn sm" data-act="peak-push" data-id="${pk.id}" data-n="1">+1달</button>
+            <button class="btn sm" data-act="peak-push" data-id="${pk.id}" data-n="3">+3달</button>
+            <input type="month" data-peak="${pk.id}" data-field="due" value="${esc(pk.due)}" aria-label="새 목표 달" style="width:auto;min-height:36px;padding:4px 8px">
+            <button class="btn sm" data-act="peak-toggle" data-id="${pk.id}">✓ 넘었어요</button>
+          </div>
+        </div>`).join('')}
+      </section>` : ''}
+
       <form class="card" data-form="review">
         <div class="card-head"><h2>📝 5분 리뷰</h2></div>
         <label class="field"><span>이번 주 잘한 것 (작은 것도 OK)</span><textarea name="wins" placeholder="예: 외주 1건 따냄, 3일 동안 2~5시 지킴">${esc(r.wins)}</textarea></label>
@@ -571,7 +704,16 @@
   const TABS = { today: renderToday, money: renderMoney, vision: renderVision, review: renderReview, settings: renderSettings };
   let tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : 'today';
 
+  // 화면을 그리는 도중 입력칸이 사라지며 생기는 blur/change로 다시 그리기가 겹치지 않게 함
+  let rendering = false, renderAgain = false;
   function render(focusSel) {
+    if (rendering) { renderAgain = true; return; }
+    rendering = true;
+    try { drawScreen(focusSel); } finally { rendering = false; }
+    if (renderAgain) { renderAgain = false; setTimeout(() => render(), 0); }
+  }
+
+  function drawScreen(focusSel) {
     rollPeriods();
     const d = new Date();
     $('#today-label').textContent = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${DAYS[d.getDay()]}요일`;
@@ -599,6 +741,10 @@
     window.scrollTo(0, 0);
   }
   window.addEventListener('popstate', syncFromHash);
+  document.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (d.dataset && d.dataset.peakDetails) openMetric = d.open ? d.dataset.peakDetails : (openMetric === d.dataset.peakDetails ? null : openMetric);
+  }, true);
   window.addEventListener('hashchange', syncFromHash);
 
   let toastTimer;
@@ -717,6 +863,35 @@
         return;
       }
       case 'peak-unlink': pendingPeak = null; render('#task-input'); return;
+      case 'peak-push': {
+        const pk = findPeak(id);
+        if (!pk) return;
+        pk.due = addMonths(today().slice(0, 7) > pk.due ? today().slice(0, 7) : pk.due, Number(el.dataset.n));
+        toast(`목표를 ${ym(pk.due)}로 다시 잡았어요`);
+        break;
+      }
+      case 'go-checkin':
+        ckDraft = { score: null, note: '' };
+        go('vision');
+        $('#checkin')?.scrollIntoView({ block: 'start' });
+        return;
+      case 'ck-edit': {
+        const c = checkinFor(checkMonth() || monthKey());
+        ckDraft = { score: c ? c.score : null, note: c ? c.note : '' };
+        render(); $('#checkin')?.scrollIntoView({ block: 'start' });
+        return;
+      }
+      case 'ck-cancel': ckDraft = null; render(); return;
+      case 'ck-score': ckDraft.note = $('#ck-note')?.value || ckDraft.note; ckDraft.score = Number(el.dataset.v); render(); $('#checkin')?.scrollIntoView({ block: 'start' }); return;
+      case 'ck-save': {
+        const month = checkMonth() || monthKey();
+        const rec = { month, score: ckDraft.score, note: ($('#ck-note')?.value || '').trim(), y1: peakPct('y1'), y5: peakPct('y5'), y10: peakPct('y10'), at: today() };
+        state.vision.checkins = (state.vision.checkins || []).filter((c) => c.month !== month).concat(rec);
+        ckDraft = null; ckPick = null;
+        toast('📈 점검을 기록했어요');
+        break;
+      }
+      case 'ck-pick': ckPick = Number(el.dataset.i); render(); $('#checkin')?.scrollIntoView({ block: 'nearest' }); return;
       case 'slot-done': {
         const s = state.slots[today()];
         if (s) { s.done = !s.done; if (s.done) toast('⏰ 오후를 지켜냈어요!'); }
@@ -751,6 +926,19 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.act === 'pick-goal') { newGoal = el.value; return; }
+    if (el.dataset.peak && el.dataset.field.startsWith('metric.')) {
+      const pk = findPeak(el.dataset.peak);
+      if (!pk) return;
+      const m = (pk.metric = pk.metric || {});
+      const key = el.dataset.field.slice(7);
+      openMetric = pk.id;
+      if (key === 'type') { m.type = el.value; if (m.type === 'income_total' && !m.since) m.since = today(); }
+      else if (key === 'target') m.target = m.type === 'manual' ? num(el.value) : parseMoney(el.value);
+      else if (key === 'current') m.current = num(el.value);
+      else m[key] = el.value.trim();
+      save(); render();
+      return;
+    }
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk.due = el.value; save(); render(); }
@@ -783,6 +971,7 @@
   document.addEventListener('input', (e) => {
     const el = e.target;
     if (el.hasAttribute('data-money')) { formatMoneyInput(el, e.isComposing); updatePreview(el); }
+    if (el.dataset.peak && el.dataset.field.startsWith('metric.')) return; // 칸을 떠날 때(change) 저장
     if (el.dataset.peak && el.dataset.field !== 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk[el.dataset.field] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
