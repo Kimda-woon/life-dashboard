@@ -270,3 +270,6 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 @media (prefers-color-scheme: dark) {
   .btn.good, .btn.fire { color: #141414; }
 }
+
+/* 키보드가 떠 있는 동안에는 아래 메뉴 숨김 (입력칸을 가리지 않게) */
+body.typing .tabs { display: none; }
