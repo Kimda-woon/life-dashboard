@@ -1,0 +1,16 @@
+{
+  "name": "나의 운영실",
+  "short_name": "나의 운영실",
+  "description": "생계 우선순위, 빚 500→0 챌린지, 10·5·1년 비전과 주간 리뷰를 한 곳에서.",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ee",
+  "theme_color": "#e0662f",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
