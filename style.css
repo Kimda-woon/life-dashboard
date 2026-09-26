@@ -348,3 +348,11 @@ body.typing .tabs { display: none; }
 .ck-detail { font-size: 13px; margin-top: 4px; min-height: 20px; }
 .ck-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
 .ck-table th, .ck-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+
+/* 기록 옮기기 안내 */
+.guide-steps { margin: 8px 0 0; padding-left: 20px; font-size: 13px; }
+.guide-steps li { margin-top: 4px; }
+
+/* 작은 산이 많아도 산길이 화면 밖으로 넘치지 않게 */
+.trail { overflow: hidden; }
+.tr-dot { flex-shrink: 1; min-width: 12px; }

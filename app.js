@@ -157,6 +157,11 @@
     };
   }
 
+  const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isEmptyState = () => !state.tasks.length && !state.fixed.length && !state.incomes.length && !state.debt.payments.length
+    && !state.vision.goals.length && !state.vision.y10 && !state.vision.y5 && !state.vision.y1;
+  const TRANSFER_TAG = '나의운영실기록:';
+
   /* ---------- 작은 산(이정표) ---------- */
   const HORIZONS = [['y10', '10년'], ['y5', '5년'], ['y1', '1년']];
   const allPeaks = () => HORIZONS.flatMap(([h, label]) => (state.vision.peaks[h] || []).map((pk) => ({ ...pk, h, hLabel: label })));
@@ -386,6 +391,9 @@
         <ol class="steps">${steps.map((s, i) => `<li class="${s.ok ? 'ok' : ''}"><span class="dot">${s.ok ? '✓' : i + 1}</span><span class="grow">${s.text}</span>${s.ok ? '' : `<button class="btn sm" data-act="go" data-to="${s.to}">하기</button>`}</li>`).join('')}</ol>
       </section>` : ''}
 
+      ${isStandalone() && isEmptyState() ? `<section class="card accent"><h2>사파리에서 쓰던 기록이 안 보이나요?</h2>
+        <p class="muted" style="margin-top:4px">아이폰은 홈 화면 앱과 사파리가 기록을 따로 저장해요. 지워진 게 아니에요. 사파리에서 <b>설정 → 📋 기록 복사하기</b>를 누른 뒤, 여기서 붙여넣으면 옮겨져요.</p>
+        <button class="btn primary sm" style="margin-top:8px" data-act="go-transfer">옮기는 방법 보기</button></section>` : ''}
       ${checkMonth() && !checkinFor(checkMonth()) && allPeaks().length ? `<section class="card accent"><div class="row between"><div><h2>📈 ${Number(checkMonth().slice(5))}월 점검할 때예요</h2><p class="muted">한 달 동안 산을 얼마나 올랐는지 1분만.</p></div><button class="btn primary sm" data-act="go-checkin">점검하기</button></div></section>` : ''}
       ${now.getDay() === 0 ? `<section class="card accent"><div class="row between"><div><h2>📝 오늘은 주간 리뷰 날</h2><p class="muted">5분만 써도 다음 주가 달라져요.</p></div><button class="btn primary sm" data-act="go" data-to="review">리뷰하기</button></div></section>` : ''}
 
@@ -683,6 +691,18 @@
         <p class="hint">챌린지를 시작할 때의 총 빚이에요. 새로 생긴 빚이 있으면 여기서 늘려 주세요.</p>
       </section>
 
+      <section class="card" id="transfer">
+        <div class="card-head"><h2>📱 사파리 ↔ 홈 화면 앱 기록 옮기기</h2></div>
+        <p class="muted small">아이폰은 <b>사파리</b>와 <b>홈 화면에 추가한 앱</b>이 기록을 따로 저장해요. 한쪽에 쓴 기록이 다른 쪽에서 안 보이면 이렇게 옮기세요.</p>
+        <ol class="guide-steps">
+          <li>기록이 <b>있는 쪽</b>(예: 사파리)에서 이 화면의 <b>📋 기록 복사하기</b>를 눌러요.</li>
+          <li>기록이 <b>없는 쪽</b>(예: 홈 화면 앱)을 열고 설정 → 아래 칸을 꾹 눌러 <b>붙여넣기</b> → <b>📥 가져오기</b>.</li>
+        </ol>
+        <button class="btn primary block" data-act="copy-state" style="margin-top:10px">📋 기록 복사하기</button>
+        <textarea id="paste-state" placeholder="여기를 꾹 눌러 붙여넣기" style="margin-top:10px;min-height:70px"></textarea>
+        <button class="btn block" data-act="paste-import" style="margin-top:8px">📥 붙여넣은 기록 가져오기</button>
+      </section>
+
       <section class="card">
         <div class="card-head"><h2>💾 백업</h2></div>
         <p class="muted small">기록은 이 브라우저에만 저장돼요. 폰과 컴퓨터를 옮기거나 브라우저 기록을 지우기 전에 꼭 내보내 두세요.</p>
@@ -868,6 +888,26 @@
         if (!pk) return;
         pk.due = addMonths(today().slice(0, 7) > pk.due ? today().slice(0, 7) : pk.due, Number(el.dataset.n));
         toast(`목표를 ${ym(pk.due)}로 다시 잡았어요`);
+        break;
+      }
+      case 'go-transfer': go('settings'); $('#transfer')?.scrollIntoView({ block: 'start' }); return;
+      case 'copy-state': {
+        const text = TRANSFER_TAG + JSON.stringify(state);
+        const done = () => toast('📋 복사했어요. 다른 쪽 설정 화면에 붙여넣으세요');
+        const fallback = () => { const ta = $('#paste-state'); ta.value = text; ta.focus(); ta.select(); toast('글자가 선택됐어요. 복사를 눌러 주세요'); };
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+        return;
+      }
+      case 'paste-import': {
+        const raw = ($('#paste-state')?.value || '').trim();
+        if (!raw) { toast('먼저 복사한 기록을 붙여넣어 주세요'); return; }
+        try {
+          const data = JSON.parse(raw.startsWith(TRANSFER_TAG) ? raw.slice(TRANSFER_TAG.length) : raw);
+          if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
+          if (!confirm('지금 이 화면의 기록을 붙여넣은 기록으로 바꿀까요?')) return;
+          state = merge(defaultState(), data);
+          toast('📥 기록을 옮겼어요');
+        } catch (err) { toast('기록을 읽을 수 없어요. 복사한 글 전체를 붙여넣었는지 확인해 주세요'); return; }
         break;
       }
       case 'go-checkin':
