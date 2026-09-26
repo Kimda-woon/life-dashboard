@@ -15,6 +15,23 @@
   const monthKey = (s = today()) => s.slice(0, 7);
   const quarterKey = (s = today()) => `${s.slice(0, 4)}-Q${Math.floor((Number(s.slice(5, 7)) - 1) / 3) + 1}`;
   const num = (v) => { const n = Number(String(v ?? '').replace(/[^\d.-]/g, '')); return Number.isFinite(n) ? n : 0; };
+  // 금액 읽기: "500,000", "50만", "50만원", "1억 2천만", "35만 5천" 모두 이해
+  const parseSub = (t) => { // 만 아래 단위: "2천5백", "3500"
+    let n = 0;
+    t = t.replace(/(\d*(?:\.\d+)?)천/, (_, d) => { n += (d ? Number(d) : 1) * 1000; return ''; });
+    t = t.replace(/(\d*(?:\.\d+)?)백/, (_, d) => { n += (d ? Number(d) : 1) * 100; return ''; });
+    return n + num(t);
+  };
+  const parseMoney = (v) => {
+    const t = String(v ?? '').replace(/[,\s원]/g, '');
+    if (!/[억만천백]/.test(t)) return Math.max(0, Math.round(num(t)));
+    const [eok, restE] = t.includes('억') ? t.split('억') : ['', t];
+    const [man, rest] = restE.includes('만') ? restE.split('만') : ['', restE];
+    const total = (t.includes('억') ? (parseSub(eok) || 1) * 1e8 : 0)
+      + (restE.includes('만') ? (parseSub(man) || 1) * 1e4 : 0)
+      + parseSub(rest);
+    return Math.max(0, Math.round(total));
+  };
   const won = (n) => Math.round(n).toLocaleString('ko-KR') + '원';
   const man = (n) => {
     n = Math.round(n);
@@ -320,7 +337,7 @@
           <div class="chips" style="margin-bottom:8px">${FIXED_PRESETS.filter((p) => !state.fixed.some((f) => f.name === p)).map((p) => `<button type="button" class="chip" data-act="preset" data-name="${esc(p)}">${esc(p)}</button>`).join('')}</div>
           <div class="row">
             <input name="name" placeholder="항목" autocomplete="off" style="flex:1;min-width:110px" id="fixed-name">
-            <input name="amount" placeholder="금액" inputmode="numeric" autocomplete="off" data-money style="flex:1;min-width:110px">
+            <input name="amount" placeholder="금액 (예: 50만)" inputmode="text" enterkeyhint="done" autocomplete="off" data-money style="flex:1;min-width:110px">
             <button class="btn primary">추가</button>
           </div>
         </form>
@@ -456,7 +473,8 @@
 
       <section class="card">
         <div class="card-head"><h2>🏔️ 빚 시작 금액</h2></div>
-        <input data-bind="debt.start" data-type="num" data-money inputmode="numeric" value="${num(state.debt.start).toLocaleString('ko-KR')}">
+        <input data-bind="debt.start" data-type="money" data-money inputmode="text" enterkeyhint="done" value="${num(state.debt.start).toLocaleString('ko-KR')}">
+        <p class="hint">숫자로 적거나 "500만"처럼 적어도 돼요.</p>
         <p class="hint">챌린지를 시작할 때의 총 빚이에요. 새로 생긴 빚이 있으면 여기서 늘려 주세요.</p>
       </section>
 
@@ -493,10 +511,23 @@
   function go(t) {
     tab = t;
     if (t === 'review') reviewWeek = null;
-    history.replaceState(null, '', '#' + t);
+    // 탭을 바꿀 때 주소(#)를 남겨서, 폰의 '뒤로' 버튼으로 이전 탭에 돌아가게 함
+    if (location.hash !== '#' + t) { history.pushState(null, '', '#' + t); }
     render();
     window.scrollTo(0, 0);
   }
+
+  // '뒤로' 버튼이나 주소 변경으로 탭이 바뀌면 그 탭을 보여 줌
+  function syncFromHash() {
+    const t = TABS[location.hash.slice(1)] ? location.hash.slice(1) : 'today';
+    if (t === tab) return;
+    tab = t;
+    if (t === 'review') reviewWeek = null;
+    render();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('popstate', syncFromHash);
+  window.addEventListener('hashchange', syncFromHash);
 
   let toastTimer;
   function toast(msg) {
@@ -514,10 +545,25 @@
     o[keys[keys.length - 1]] = value;
   }
 
-  const formatMoneyInput = (el) => {
-    const n = num(el.value);
-    el.value = el.value.trim() === '' ? '' : n.toLocaleString('ko-KR');
+  // 숫자만 쳤을 때만 쉼표를 넣고, 커서 위치는 그대로 둠. "50만"처럼 한글을 쓰는 중이면 건드리지 않음
+  const formatMoneyInput = (el, composing) => {
+    const v = el.value;
+    if (composing || /[^\d,\s]/.test(v)) return;
+    const digits = v.replace(/\D/g, '');
+    if (!digits) { el.value = ''; return; }
+    const caret = el.selectionStart ?? v.length;
+    const before = v.slice(0, caret).replace(/\D/g, '').length;
+    const out = Number(digits).toLocaleString('ko-KR');
+    if (out === v) return;
+    el.value = out;
+    let pos = 0, seen = 0;
+    while (pos < out.length && seen < before) { if (/\d/.test(out[pos])) seen++; pos++; }
+    try { el.setSelectionRange(pos, pos); } catch (e) { /* 일부 입력칸은 커서 지정 불가 */ }
   };
+
+  // 옛 아이폰 등 <dialog>를 지원하지 않는 브라우저 대비
+  const openDlg = (d) => { if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', ''); };
+  const closeDlg = () => { const d = $('#dlg'); if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); };
 
   /* ---------- 금액 입력 창 ---------- */
   function openAmount(kind) {
@@ -527,7 +573,7 @@
       <h2>${isIncome ? '💰 돈 들어왔어요' : '✅ 빚 갚았어요'}</h2>
       <p class="muted small">${isIncome ? '작은 돈도 기록하면 어떤 일이 돈이 되는지 보여요.' : `남은 빚 ${won(debtLeft())}`}</p>
       <label class="field"><span>금액</span>
-        <input name="amount" inputmode="numeric" autocomplete="off" placeholder="0" data-money required>
+        <input name="amount" inputmode="text" enterkeyhint="done" autocomplete="off" placeholder="예: 300000 또는 30만" data-money required>
         <small class="amount-preview"></small>
       </label>
       <div class="chips quick">${[10000, 50000, 100000, 500000].map((v) => `<button type="button" class="chip" data-add="${v}">+${man(v)}</button>`).join('')}</div>
@@ -536,13 +582,14 @@
       <label class="field"><span>메모 (선택)</span><input name="memo" autocomplete="off" placeholder="${isIncome ? '예: 9월 원고료' : '예: 카드값 일부'}"></label>
       <div class="row end"><button type="button" class="btn ghost" data-close>취소</button><button class="btn primary">저장</button></div>
     </form>`;
-    dlg.showModal();
+    openDlg(dlg);
     setTimeout(() => dlg.querySelector('[name=amount]').focus(), 30);
   }
 
   function updatePreview(input) {
     const p = input.closest('.field')?.querySelector('.amount-preview');
-    if (p) p.textContent = num(input.value) ? `= ${man(num(input.value))}` : '';
+    const v = parseMoney(input.value);
+    if (p) p.textContent = v ? `= ${won(v)} (${man(v)})` : '';
   }
 
   /* ---------- 이벤트 ---------- */
@@ -550,11 +597,11 @@
     const tabBtn = e.target.closest('.tabs button');
     if (tabBtn) return go(tabBtn.dataset.tab);
 
-    if (e.target.closest('[data-close]')) return $('#dlg').close();
+    if (e.target.closest('[data-close]')) return closeDlg();
     const add = e.target.closest('[data-add]');
     if (add) {
       const input = $('#dlg [name=amount]');
-      input.value = (num(input.value) + num(add.dataset.add)).toLocaleString('ko-KR');
+      input.value = (parseMoney(input.value) + num(add.dataset.add)).toLocaleString('ko-KR');
       updatePreview(input);
       return;
     }
@@ -616,12 +663,27 @@
     }
   });
 
+  // 휴대폰 키보드가 뜨면 아래 고정 메뉴가 입력칸·버튼을 가리지 않게 숨김
+  const isTyping = (el) => el && el.matches('input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea, select');
+  document.addEventListener('focusin', (e) => {
+    if (!isTyping(e.target) || !matchMedia('(pointer: coarse)').matches) return; // 터치 화면(폰)에서만
+    document.body.classList.add('typing');
+    setTimeout(() => { try { e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (err) { /* 무시 */ } }, 300);
+  });
+  document.addEventListener('focusout', () => {
+    setTimeout(() => { if (!isTyping(document.activeElement)) document.body.classList.remove('typing'); }, 100);
+  });
+  // 한글 조합이 끝난 뒤 금액 칸 정리
+  document.addEventListener('compositionend', (e) => {
+    if (e.target.hasAttribute?.('data-money')) { formatMoneyInput(e.target, false); updatePreview(e.target); }
+  });
+
   let bindTimer;
   document.addEventListener('input', (e) => {
     const el = e.target;
-    if (el.hasAttribute('data-money')) { formatMoneyInput(el); updatePreview(el); }
+    if (el.hasAttribute('data-money')) { formatMoneyInput(el, e.isComposing); updatePreview(el); }
     if (el.dataset.bind && !el.hasAttribute('data-rerender')) {
-      setPath(el.dataset.bind, el.dataset.type === 'num' ? num(el.value) : el.value);
+      setPath(el.dataset.bind, el.dataset.type === 'money' ? parseMoney(el.value) : el.dataset.type === 'num' ? num(el.value) : el.value);
       clearTimeout(bindTimer);
       bindTimer = setTimeout(save, 300);
     }
@@ -660,7 +722,7 @@
     }
     if (kind === 'fixed') {
       const name = val('name');
-      const amount = num(val('amount'));
+      const amount = parseMoney(val('amount'));
       if (!name || !amount) { toast('항목과 금액을 둘 다 적어 주세요'); return; }
       state.fixed.push({ id: uid(), name, amount });
       save();
@@ -668,7 +730,7 @@
       return;
     }
     if (kind === 'amount') {
-      const amount = num(val('amount'));
+      const amount = parseMoney(val('amount'));
       if (amount <= 0) { toast('금액을 적어 주세요'); return; }
       const date = val('date') || today();
       const memo = val('memo');
@@ -680,7 +742,7 @@
         state.debt.payments.push({ id: uid(), amount, date, memo });
         toast(before > 0 && debtLeft() <= 0 ? '🎉🎉 빚 0원 달성! 정말 해냈어요!' : `✅ ${man(amount)} 갚았어요. 남은 빚 ${man(debtLeft())}`);
       }
-      $('#dlg').close();
+      closeDlg();
     }
     if (kind === 'review') {
       const next = [0, 1, 2].map((i) => val('next' + i));
@@ -751,7 +813,7 @@
   let lastStamp = today() + new Date().getHours();
   setInterval(() => {
     const stamp = today() + new Date().getHours();
-    if (stamp !== lastStamp && !$('#dlg').open && !document.activeElement?.matches('input, textarea, select')) {
+    if (stamp !== lastStamp && !$('#dlg').hasAttribute('open') && !document.activeElement?.matches('input, textarea, select')) {
       lastStamp = stamp;
       applyPendingWeek();
       render();
