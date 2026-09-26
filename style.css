@@ -273,3 +273,41 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 
 /* 키보드가 떠 있는 동안에는 아래 메뉴 숨김 (입력칸을 가리지 않게) */
 body.typing .tabs { display: none; }
+
+/* 목적 · 작은 산 */
+.why { display: block; margin-top: 8px; }
+.why > span { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+.peaks { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.peaks h3 { font-size: 14px; }
+.trail { display: flex; align-items: center; margin: 12px 0 4px; }
+.tr-end { font-size: 18px; flex: none; }
+.tr-seg { flex: 1; height: 3px; background: var(--line); min-width: 6px; }
+.tr-dot {
+  width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  border: 2px solid var(--line); background: var(--card); font-size: 11px; font-weight: 800;
+}
+.tr-dot.done { background: var(--good); border-color: var(--good); color: #fff; }
+.tr-dot.here { border-color: var(--accent); background: var(--accent-soft); font-size: 13px; width: 28px; height: 28px; }
+.peak { background: var(--soft); border-radius: 12px; padding: 8px 8px 10px; margin-top: 8px; border: 2px solid transparent; }
+.peak.here { border-color: var(--accent); background: var(--accent-soft); }
+.peak.done { opacity: .75; }
+.peak-top { display: flex; align-items: center; gap: 8px; }
+.peak-top input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--good); flex: none; margin: 0; }
+.peak .peak-text { flex: 1; min-width: 0; min-height: 36px; padding: 6px 8px; border: 0; background: transparent; font-weight: 700; }
+.peak .peak-text:focus { background: var(--card); }
+.peak.done .peak-text { text-decoration: line-through; }
+.peak-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 0 30px; }
+.peak-meta .tag { margin-left: 0; }
+.here-tag { background: var(--accent); color: #fff; }
+.done-tag { background: var(--good-soft); color: var(--good); }
+.due { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.due input { width: auto; min-height: 30px; padding: 2px 6px; font-size: 12px; border-radius: 8px; }
+.due.late { color: var(--accent); font-weight: 700; }
+.due.late::after { content: "늦어졌어요"; }
+.peak-next { display: flex; gap: 6px; margin: 6px 0 0 30px; }
+.peak-next input { flex: 1; min-width: 0; min-height: 38px; font-size: 14px; padding: 6px 10px; }
+.peak-next .btn.sm { white-space: nowrap; }
+.summit .climb { margin: 6px 0 0; padding-left: 0; list-style: none; }
+.summit .climb li { margin-top: 4px; font-weight: 700; }
+.summit .climb .tag { margin: 0 6px 0 0; }
+.peak-link { font-size: 13px; background: var(--accent-soft); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }

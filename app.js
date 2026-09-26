@@ -65,6 +65,8 @@
     fixed: [],
     vision: {
       y10: '', y5: '', y1: '',
+      why: { y10: '', y5: '', y1: '' },          // 목표마다 목적(왜)
+      peaks: { y10: [], y5: [], y1: [] },         // 작은 산(이정표)
       goals: [],
       quarter: { key: '', text: '', prev: '' },
       month: { key: '', text: '', prev: '' },
@@ -77,7 +79,7 @@
     const out = { ...base, ...data };
     out.debt = { ...base.debt, ...(data.debt || {}) };
     out.vision = { ...base.vision, ...(data.vision || {}) };
-    ['quarter', 'month', 'week'].forEach((k) => { out.vision[k] = { ...base.vision[k], ...(out.vision[k] || {}) }; });
+    ['quarter', 'month', 'week', 'why', 'peaks'].forEach((k) => { out.vision[k] = { ...base.vision[k], ...(out.vision[k] || {}) }; });
     return out;
   }
 
@@ -148,9 +150,60 @@
       paid: sum(state.debt.payments.filter((p) => inWeek(p.date))),
       done: done.length,
       fire: done.filter((t) => t.cat === 'now').length,
-      linked: done.filter((t) => t.goalId).length,
+      linked: done.filter((t) => t.goalId || t.peakId).length,
+      peaks: allPeaks().filter((pk) => pk.done && inWeek(pk.doneDate)).length,
       slotDays,
     };
+  }
+
+  /* ---------- 작은 산(이정표) ---------- */
+  const HORIZONS = [['y10', '10년'], ['y5', '5년'], ['y1', '1년']];
+  const allPeaks = () => HORIZONS.flatMap(([h, label]) => (state.vision.peaks[h] || []).map((pk) => ({ ...pk, h, hLabel: label })));
+  const findPeak = (id) => { for (const [h] of HORIZONS) { const pk = (state.vision.peaks[h] || []).find((x) => x.id === id); if (pk) return pk; } return null; };
+  const currentPeak = (h) => (state.vision.peaks[h] || []).find((pk) => !pk.done);
+  const ym = (s) => (s ? `${s.slice(0, 4)}.${s.slice(5, 7)}` : '');
+
+  // 🏁━✅━🚶━○━🏔️ 산길 그림
+  function trail(list) {
+    if (!list.length) return '';
+    const cur = list.findIndex((pk) => !pk.done);
+    const dots = list.map((pk, i) => {
+      const cls = pk.done ? 'done' : i === cur ? 'here' : '';
+      const icon = pk.done ? '✓' : i === cur ? '🚶' : '';
+      return `<span class="tr-seg"></span><span class="tr-dot ${cls}" title="${esc(pk.text)}">${icon}</span>`;
+    }).join('');
+    return `<div class="trail" aria-hidden="true"><span class="tr-end">🏁</span>${dots}<span class="tr-seg"></span><span class="tr-end">🏔️</span></div>`;
+  }
+
+  function peaksBlock(h) {
+    const list = state.vision.peaks[h] || [];
+    const done = list.filter((pk) => pk.done).length;
+    const pct = list.length ? Math.round((done / list.length) * 100) : 0;
+    const cur = currentPeak(h);
+    const late = (pk) => !pk.done && pk.due && pk.due < today().slice(0, 7);
+    return `<div class="peaks">
+      <div class="row between"><h3>⛰️ 작은 산</h3>${list.length ? `<span class="muted small">${done}/${list.length} 넘음 · ${pct}%</span>` : ''}</div>
+      ${list.length ? `<div class="bar thin" style="margin-top:6px"><i style="width:${pct}%"></i></div>${trail(list)}` : ''}
+      ${list.map((pk) => `<div class="peak ${pk.done ? 'done' : ''} ${cur && pk.id === cur.id ? 'here' : ''}">
+        <div class="peak-top">
+          <input type="checkbox" data-act="peak-toggle" data-id="${pk.id}" ${pk.done ? 'checked' : ''} aria-label="넘었어요">
+          <input class="peak-text" data-peak="${pk.id}" data-field="text" value="${esc(pk.text)}" aria-label="작은 산">
+          <button class="icon-btn" data-act="peak-del" data-id="${pk.id}" aria-label="삭제">✕</button>
+        </div>
+        <div class="peak-meta">
+          ${cur && pk.id === cur.id ? '<span class="tag here-tag">🚶 지금 여기</span>' : ''}
+          ${pk.done ? `<span class="tag done-tag">✓ ${ym(pk.doneDate)} 넘음</span>` : `<label class="due ${late(pk) ? 'late' : ''}">목표 <input type="month" data-peak="${pk.id}" data-field="due" value="${esc(pk.due || '')}"></label>`}
+        </div>
+        ${pk.done ? '' : `<div class="peak-next">
+          <input data-peak="${pk.id}" data-field="next" value="${esc(pk.next || '')}" placeholder="다음 한 걸음 (예: 워크숍 소개글 쓰기)" autocomplete="off">
+          <button class="btn sm" data-act="peak-today" data-id="${pk.id}">📌 오늘 할 일로</button>
+        </div>`}
+      </div>`).join('')}
+      <form class="add-task" data-form="peak" data-h="${h}" style="margin-top:10px">
+        <input name="peak" placeholder="${list.length ? '다음 작은 산 추가' : '목표까지 가는 중간 지점 (예: 첫 워크숍 열기)'}" autocomplete="off">
+        <button class="btn">추가</button>
+      </form>
+    </div>`;
   }
 
   /* ---------- 공통 조각 ---------- */
@@ -177,6 +230,7 @@
 
   /* ---------- 오늘 ---------- */
   let newCat = 'now';
+  let pendingPeak = null; // '오늘 할 일로' 누른 작은 산
   let newGoal = '';
 
   function renderToday() {
@@ -218,9 +272,10 @@
 
       ${now.getDay() === 0 ? `<section class="card accent"><div class="row between"><div><h2>📝 오늘은 주간 리뷰 날</h2><p class="muted">5분만 써도 다음 주가 달라져요.</p></div><button class="btn primary sm" data-act="go" data-to="review">리뷰하기</button></div></section>` : ''}
 
-      ${(goals.length || weekItems.length) ? `<section class="card compass">
+      ${(goals.length || weekItems.length || currentPeak('y1')) ? `<section class="card compass">
         <div class="card-head"><h2>🧭 나침반</h2><button class="btn sm ghost" data-act="go" data-to="vision">비전 보기</button></div>
         ${goals.length ? `<p class="muted small">1년 목표</p><ul>${goals.map((g) => `<li class="compass-goal">${esc(g.text)}</li>`).join('')}</ul>` : ''}
+        ${currentPeak('y1') ? `<p class="muted small" style="margin-top:8px">⛰️ 지금 오르는 산 (1년)</p><ul><li class="compass-goal">${esc(currentPeak('y1').text)}${currentPeak('y1').next ? ` <span class="muted small">→ ${esc(currentPeak('y1').next)}</span>` : ''}</li></ul>` : ''}
         ${weekItems.length ? `<p class="muted small" style="margin-top:8px">이번 주 핵심</p><ul>${weekItems.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
       </section>` : ''}
 
@@ -244,6 +299,7 @@
 
       <section class="card">
         <div class="card-head"><h2>✅ 오늘 할 일</h2><span class="muted">생계 일부터</span></div>
+        ${pendingPeak && findPeak(pendingPeak) ? `<div class="peak-link">⛰️ <b>${esc(findPeak(pendingPeak).text)}</b>을(를) 위한 일로 넣어요. 종류를 고르고 <b>추가</b>를 누르세요. <button class="btn sm ghost" data-act="peak-unlink">연결 빼기</button></div>` : ''}
         <form class="add-task" data-form="task">
           <input name="task" placeholder="할 일을 적고 Enter" autocomplete="off" id="task-input">
           <button class="btn primary">추가</button>
@@ -268,9 +324,10 @@
     const t = today();
     const days = x.created && x.created < t ? Math.round((parseYmd(t) - parseYmd(x.created)) / 864e5) : 0;
     const g = x.goalId && goalName(x.goalId);
+    const pk = x.peakId && findPeak(x.peakId);
     return `<div class="task ${x.done ? 'done' : ''}">
       <input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료">
-      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${days && !x.done ? `<span class="tag old">${days}일째</span>` : ''}</span>
+      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}</span>` : ''}${days && !x.done ? `<span class="tag old">${days}일째</span>` : ''}</span>
       <button class="icon-btn" data-act="del-task" data-id="${x.id}" aria-label="삭제">✕</button>
     </div>`;
   }
@@ -357,13 +414,27 @@
     const q = Number(quarterKey().slice(-1));
     const m = Number(t.slice(5, 7));
     const doneCount = (id) => state.tasks.filter((x) => x.goalId === id && x.done).length;
+    const WHY_PH = { y10: '예: 내 글로 사람들을 돕는 사람이 되고 싶어서', y5: '예: 생계 걱정 없이 쓰는 일에 집중하려고', y1: '예: 빚을 끝내고 숨 돌릴 여유를 만들려고' };
     const horizon = (key, cls, label, ph) => `<section class="card horizon ${cls}">
       <span class="label">${label}</span>
+      <label class="why"><span>🎯 목적 · 왜 이걸 원하나요?</span><input data-bind="vision.why.${key}" value="${esc(v.why[key])}" placeholder="${WHY_PH[key]}" autocomplete="off"></label>
+      <label class="why"><span>🌄 이루고 싶은 모습</span></label>
       <textarea data-bind="vision.${key}" placeholder="${ph}">${esc(v[key])}</textarea>
+      ${peaksBlock(key)}
     </section>`;
+    const conquered = allPeaks().filter((pk) => pk.done).sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
+    const climbing = HORIZONS.map(([h, label]) => [label, currentPeak(h)]).filter(([, pk]) => pk);
 
     return `<div class="stack">
       <p class="muted">멀리서부터 적고, 가까운 것부터 실행해요. 적는 즉시 저장돼요.</p>
+
+      <section class="card summit">
+        <div class="card-head"><h2>🏆 내가 넘은 산</h2><span class="muted">${conquered.length}개</span></div>
+        ${climbing.length ? `<p class="muted small">지금 오르는 산</p><ul class="climb">${climbing.map(([label, pk]) => `<li><span class="tag">${label}</span> ${esc(pk.text)}</li>`).join('')}</ul>` : ''}
+        ${conquered.length ? `<details ${conquered.length <= 3 ? 'open' : ''}><summary class="muted small" style="margin-top:8px">넘은 산 모두 보기</summary>
+          <ul class="list">${conquered.map((pk) => `<li><span class="when">${ym(pk.doneDate)}</span><span class="grow">✓ ${esc(pk.text)}</span><span class="tag">${pk.hLabel}</span></li>`).join('')}</ul></details>`
+          : '<p class="muted small" style="margin-top:6px">아래 10년·5년·1년 칸에 작은 산을 적고, 넘을 때마다 체크하세요. 넘은 산이 여기에 쌓여요.</p>'}
+      </section>
 
       ${horizon('y10', 'h10', '10년 후 · ' + (Number(t.slice(0, 4)) + 10), '어디에 살고, 무슨 일을 하고, 누구와 하루를 보내나요? 이루고 싶은 모습을 편하게 적어 보세요.')}
       <div class="down">↓ 그러려면 5년 뒤엔</div>
@@ -434,6 +505,7 @@
           <div class="stat"><b>${st.slotDays}/7일</b><span>⏰ 2~5시 지킨 날</span></div>
           <div class="stat"><b>${st.done}개</b><span>✅ 끝낸 일 전체</span></div>
           <div class="stat"><b>${st.done ? Math.round((st.linked / st.done) * 100) : 0}%</b><span>🎯 목표와 연결된 일</span></div>
+          <div class="stat"><b>${st.peaks}개</b><span>⛰️ 넘은 작은 산</span></div>
         </div>
       </section>
 
@@ -621,6 +693,30 @@
         break;
       }
       case 'del-task': state.tasks = state.tasks.filter((t) => t.id !== id); break;
+      case 'peak-toggle': {
+        const pk = findPeak(id);
+        if (!pk) return;
+        pk.done = !pk.done;
+        pk.doneDate = pk.done ? today() : '';
+        if (pk.done) toast('🎉 작은 산 하나 넘었어요! 여기까지 왔어요');
+        break;
+      }
+      case 'peak-del': {
+        if (!confirm('이 작은 산을 지울까요?')) return;
+        HORIZONS.forEach(([h]) => { state.vision.peaks[h] = (state.vision.peaks[h] || []).filter((x) => x.id !== id); });
+        state.tasks.forEach((t) => { if (t.peakId === id) t.peakId = null; });
+        break;
+      }
+      case 'peak-today': {
+        const pk = findPeak(id);
+        if (!pk) return;
+        pendingPeak = id;
+        go('today');
+        const input = $('#task-input');
+        if (input) { input.value = pk.next || pk.text; input.focus(); input.scrollIntoView({ block: 'center' }); }
+        return;
+      }
+      case 'peak-unlink': pendingPeak = null; render('#task-input'); return;
       case 'slot-done': {
         const s = state.slots[today()];
         if (s) { s.done = !s.done; if (s.done) toast('⏰ 오후를 지켜냈어요!'); }
@@ -655,6 +751,11 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.act === 'pick-goal') { newGoal = el.value; return; }
+    if (el.dataset.peak && el.dataset.field === 'due') {
+      const pk = findPeak(el.dataset.peak);
+      if (pk) { pk.due = el.value; save(); render(); }
+      return;
+    }
     if (el.dataset.act === 'import') return importData(el.files[0]);
     if (el.dataset.bind && el.hasAttribute('data-rerender')) {
       setPath(el.dataset.bind, el.value);
@@ -682,6 +783,11 @@
   document.addEventListener('input', (e) => {
     const el = e.target;
     if (el.hasAttribute('data-money')) { formatMoneyInput(el, e.isComposing); updatePreview(el); }
+    if (el.dataset.peak && el.dataset.field !== 'due') {
+      const pk = findPeak(el.dataset.peak);
+      if (pk) { pk[el.dataset.field] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
+      return;
+    }
     if (el.dataset.bind && !el.hasAttribute('data-rerender')) {
       setPath(el.dataset.bind, el.dataset.type === 'money' ? parseMoney(el.value) : el.dataset.type === 'num' ? num(el.value) : el.value);
       clearTimeout(bindTimer);
@@ -699,9 +805,20 @@
     if (kind === 'task') {
       const text = val('task');
       if (!text) return;
-      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, done: false, created: today(), doneDate: null });
+      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, done: false, created: today(), doneDate: null });
+      pendingPeak = null;
       save();
       render('#task-input');
+      return;
+    }
+    if (kind === 'peak') {
+      const text = val('peak');
+      if (!text) return;
+      const h = f.dataset.h;
+      state.vision.peaks[h] = [...(state.vision.peaks[h] || []), { id: uid(), text, due: '', next: '', done: false, doneDate: '' }];
+      save();
+      render();
+      $(`form[data-form=peak][data-h=${h}] input`)?.focus();
       return;
     }
     if (kind === 'slot') {
