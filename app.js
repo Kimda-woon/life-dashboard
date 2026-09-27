@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.27.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.09.27.4'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -926,7 +926,8 @@
       <div class="row end"><button type="button" class="btn ghost" data-close>취소</button><button class="btn primary">저장</button></div>
     </form>`;
     openDlg(dlg);
-    setTimeout(() => dlg.querySelector('[name=amount]').focus(), 30);
+    // 누른 그 순간에 바로 커서를 넣어야 아이폰에서 키보드가 뜸 (타이머로 미루면 커서만 생김)
+    dlg.querySelector('[name=amount]').focus();
   }
 
   function updatePreview(input) {
@@ -1050,12 +1051,19 @@
       case 'copy-state': {
         const text = TRANSFER_TAG + JSON.stringify(state);
         const done = () => toast('📋 복사했어요. 다른 쪽 설정 화면에 붙여넣으세요');
-        const fallback = () => { const ta = $('#paste-state'); ta.value = text; ta.focus(); ta.select(); toast('글자가 선택됐어요. 복사를 눌러 주세요'); };
+        const fallback = () => {
+          const ta = $('#paste-state');
+          ta.closest('details').open = true;
+          ta.value = text;
+          ta.scrollIntoView({ block: 'center' });
+          toast('아래 칸의 글을 꾹 눌러 전체 선택 → 복사해 주세요');
+        };
         if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
         return;
       }
       case 'clip-import': {
-        const manual = () => { const d = el.parentElement.querySelector('details'); if (d) d.open = true; $('#paste-state')?.focus(); toast('아래 칸에 직접 붙여넣어 주세요'); };
+        // 코드로 칸에 커서를 넣으면 아이폰은 키보드 없이 커서만 생겨서, 칸만 펼쳐 두고 직접 누르게 함
+        const manual = () => { const ta = $('#paste-state'); ta.closest('details').open = true; ta.scrollIntoView({ block: 'center' }); toast('아래 칸을 눌러 직접 붙여넣어 주세요'); };
         if (!navigator.clipboard?.readText) { manual(); return; }
         navigator.clipboard.readText().then((raw) => {
           if (!raw || !raw.trim()) { toast('복사한 기록이 없어요. 먼저 📋 기록 복사하기를 눌러 주세요'); return; }
@@ -1170,8 +1178,12 @@
     const on = typing && matchMedia('(pointer: coarse)').matches && h < fullH * 0.78;
     document.body.classList.toggle('typing', on);
   }
+  // 손으로 누르지 않고 코드로 커서가 들어간 칸 (아이폰에서는 키보드가 안 뜰 수 있음)
+  let lastTouch = 0;
+  const noKb = new WeakSet();
   document.addEventListener('focusin', (e) => {
     if (!isTyping(e.target)) return;
+    if (Date.now() - lastTouch > 1000 && !document.body.classList.contains('typing')) noKb.add(e.target); else noKb.delete(e.target);
     if (viewH() > fullH) fullH = viewH();
     setTimeout(syncTyping, 350);
     setTimeout(() => { try { e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (err) { /* 무시 */ } }, 300);
@@ -1181,7 +1193,13 @@
   window.addEventListener('resize', syncTyping);
   window.addEventListener('orientationchange', () => { fullH = 0; setTimeout(() => { fullH = 0; syncTyping(); }, 400); });
   // 혹시라도 메뉴가 숨겨진 채 남아 있으면, 화면을 만지거나 스크롤할 때 다시 확인
-  document.addEventListener('touchstart', () => { if (document.body.classList.contains('typing')) setTimeout(syncTyping, 50); }, { passive: true });
+  document.addEventListener('touchstart', (e) => {
+    // 커서는 있는데 키보드가 안 뜬 칸을 누르면, 커서를 뺐다가 다시 넣어 키보드가 뜨게 함
+    const t = e.target;
+    if (t === document.activeElement && noKb.has(t)) { noKb.delete(t); t.blur(); }
+    lastTouch = Date.now();
+    if (document.body.classList.contains('typing')) setTimeout(syncTyping, 50);
+  }, { passive: true });
   document.addEventListener('scroll', () => { if (document.body.classList.contains('typing')) syncTyping(); }, { passive: true });
   document.addEventListener('visibilitychange', syncTyping);
   // 한글 조합이 끝난 뒤 금액 칸 정리
@@ -1199,7 +1217,8 @@
   let bindTimer;
   document.addEventListener('input', (e) => {
     const el = e.target;
-    if (el.classList.contains('grow-text')) { el.value = el.value.replace(/\n/g, ' '); autoGrow(el); }
+    // 한글 조합 중에 칸 내용을 건드리면 아이폰에서 글자가 안 써지므로, 줄바꿈이 들어온 경우에만 고침
+    if (el.classList.contains('grow-text')) { if (!e.isComposing && el.value.includes('\n')) el.value = el.value.replace(/\n/g, ' '); autoGrow(el); }
     if (el.hasAttribute('data-money')) { formatMoneyInput(el, e.isComposing); updatePreview(el); }
     if (el.dataset.step) {
       const st = findStep(findPeak(el.dataset.peak), el.dataset.step);
