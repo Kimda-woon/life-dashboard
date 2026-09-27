@@ -319,12 +319,6 @@ body.typing .tabs { display: none; }
 .summit .climb .tag { margin: 0 6px 0 0; }
 .peak-link { font-size: 13px; background: var(--accent-soft); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
 
-/* 숫자로 재기 */
-.metric { margin: 6px 0 0 30px; padding: 8px 10px; background: var(--card); border-radius: 10px; }
-.metric-set { margin: 6px 0 0 30px; font-size: 13px; }
-.metric-set summary { cursor: pointer; color: var(--muted); font-weight: 700; }
-.metric-set select, .metric-set input { min-height: 40px; font-size: 14px; padding: 6px 10px; margin-top: 6px; }
-
 /* 늦어진 산 */
 .late-card { border-color: var(--accent); }
 .late-item { padding: 10px 0; border-top: 1px solid var(--line); }
@@ -399,7 +393,7 @@ body.typing .tabs { display: none; }
 .mv-pair .mv:disabled { opacity: .3; cursor: default; }
 @media (max-width: 400px) {
   .steps-box { margin-left: 0; }
-  .metric, .metric-set, .peak-meta { margin-left: 4px; }
+  .peak-meta { margin-left: 4px; }
 }
 
 /* 여러 줄로 늘어나는 제목 칸 */
