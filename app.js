@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.27.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.09.27.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -794,11 +794,15 @@
         <p class="muted small">아이폰은 <b>사파리</b>와 <b>홈 화면에 추가한 앱</b>이 기록을 따로 저장해요. 한쪽에 쓴 기록이 다른 쪽에서 안 보이면 이렇게 옮기세요.</p>
         <ol class="guide-steps">
           <li>기록이 <b>있는 쪽</b>(예: 사파리)에서 이 화면의 <b>📋 기록 복사하기</b>를 눌러요.</li>
-          <li>기록이 <b>없는 쪽</b>(예: 홈 화면 앱)을 열고 설정 → 아래 칸을 꾹 눌러 <b>붙여넣기</b> → <b>📥 가져오기</b>.</li>
+          <li>기록이 <b>없는 쪽</b>(예: 홈 화면 앱)을 열고 설정 → <b>📥 복사한 기록 가져오기</b> → 뜨는 <b>붙여넣기</b>를 눌러요.</li>
         </ol>
-        <button class="btn primary block" data-act="copy-state" style="margin-top:10px">📋 기록 복사하기</button>
-        <textarea id="paste-state" placeholder="여기를 꾹 눌러 붙여넣기" style="margin-top:10px;min-height:70px"></textarea>
-        <button class="btn block" data-act="paste-import" style="margin-top:8px">📥 붙여넣은 기록 가져오기</button>
+        <button class="btn block" data-act="copy-state" style="margin-top:10px">📋 기록 복사하기</button>
+        <button class="btn primary block" data-act="clip-import" style="margin-top:8px">📥 복사한 기록 가져오기</button>
+        <p class="hint">누르면 위에 <b>붙여넣기</b> 말풍선이 떠요. 그걸 한 번 더 누르면 돼요.</p>
+        <details style="margin-top:8px"><summary class="muted small">버튼이 안 되면: 직접 붙여넣기</summary>
+          <textarea id="paste-state" placeholder="여기를 한 번 누르고, 한 번 더 누르면 뜨는 '붙여넣기'를 누르세요" style="margin-top:8px;min-height:90px"></textarea>
+          <button class="btn block" data-act="paste-import" style="margin-top:8px">📥 붙여넣은 기록 가져오기</button>
+        </details>
       </section>
 
       <section class="card">
@@ -1050,17 +1054,20 @@
         if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
         return;
       }
+      case 'clip-import': {
+        const manual = () => { const d = el.parentElement.querySelector('details'); if (d) d.open = true; $('#paste-state')?.focus(); toast('아래 칸에 직접 붙여넣어 주세요'); };
+        if (!navigator.clipboard?.readText) { manual(); return; }
+        navigator.clipboard.readText().then((raw) => {
+          if (!raw || !raw.trim()) { toast('복사한 기록이 없어요. 먼저 📋 기록 복사하기를 눌러 주세요'); return; }
+          importText(raw.trim());
+        }, manual);
+        return;
+      }
       case 'paste-import': {
         const raw = ($('#paste-state')?.value || '').trim();
         if (!raw) { toast('먼저 복사한 기록을 붙여넣어 주세요'); return; }
-        try {
-          const data = JSON.parse(raw.startsWith(TRANSFER_TAG) ? raw.slice(TRANSFER_TAG.length) : raw);
-          if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
-          if (!confirm('지금 이 화면의 기록을 붙여넣은 기록으로 바꿀까요?')) return;
-          state = merge(defaultState(), data);
-          toast('📥 기록을 옮겼어요');
-        } catch (err) { toast('기록을 읽을 수 없어요. 복사한 글 전체를 붙여넣었는지 확인해 주세요'); return; }
-        break;
+        importText(raw);
+        return;
       }
       case 'go-checkin':
         ckDraft = { score: null, note: '' };
@@ -1328,6 +1335,22 @@
       delete w.pending;
       save();
     }
+  }
+
+  // 복사해 온 기록(글)을 읽어서 지금 기록과 바꿈
+  function importText(raw) {
+    // 메모 앱을 거치며 앞뒤에 붙은 글자나 줄바꿈이 있어도 { … } 부분만 읽음
+    const body = raw.includes(TRANSFER_TAG) ? raw.slice(raw.indexOf(TRANSFER_TAG) + TRANSFER_TAG.length) : raw;
+    let data;
+    try {
+      data = JSON.parse(body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1));
+      if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
+    } catch (err) { toast('기록을 읽을 수 없어요. 📋 기록 복사하기로 복사한 글 전체인지 확인해 주세요'); return; }
+    if (!confirm('지금 이 화면의 기록을 복사해 온 기록으로 바꿀까요?')) return;
+    state = merge(defaultState(), data);
+    save();
+    render();
+    toast('📥 기록을 옮겼어요');
   }
 
   /* ---------- 백업 ---------- */
