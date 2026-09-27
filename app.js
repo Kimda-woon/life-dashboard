@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.27.4'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.09.27.5'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -199,23 +199,6 @@
   const currentPeak = (h) => (state.vision.peaks[h] || []).find((pk) => !pk.done);
   const ym = (s) => (s ? `${s.slice(0, 4)}.${s.slice(5, 7)}` : '');
 
-  // 숫자로 재는 작은 산: 돈 기록과 자동 연결되거나 직접 적음
-  const METRICS = {
-    '': '숫자 없이',
-    debt: '빚 갚기 (돈 탭에서 자동)',
-    income_month: '이번 달 수입 (자동)',
-    income_total: '이 산을 만든 뒤 번 돈 합계 (자동)',
-    manual: '직접 적기 (예: 수강생 수)',
-  };
-  function metricValue(pk) {
-    const m = pk.metric;
-    if (!m || !m.type) return null;
-    if (m.type === 'debt') return { cur: debtPaid(), target: num(state.debt.start), money: true, label: '갚은 빚' };
-    if (m.type === 'income_month') { const mk = monthKey(); return { cur: sum(state.incomes.filter((i) => monthKey(i.date) === mk)), target: num(m.target), money: true, label: '이번 달 수입' }; }
-    if (m.type === 'income_total') return { cur: sum(state.incomes.filter((i) => i.date >= (m.since || '0000'))), target: num(m.target), money: true, label: '모은 수입' };
-    return { cur: num(m.current), target: num(m.target), money: false, unit: m.unit || '', label: '지금' };
-  }
-  const fmtMetric = (v, n) => (v.money ? man(n) : `${n.toLocaleString('ko-KR')}${v.unit}`);
   // 산 하나 = 1점. 작은 목표가 있으면 이룬 만큼 부분 점수
   const peakScore = (pk) => (pk.done ? 1 : pk.steps && pk.steps.length ? pk.steps.filter((s) => s.done).length / pk.steps.length : 0);
   const peakPct = (h) => { const l = state.vision.peaks[h] || []; return l.length ? Math.round((l.reduce((a, pk) => a + peakScore(pk), 0) / l.length) * 100) : null; };
@@ -244,31 +227,9 @@
     return `<div class="trail" aria-hidden="true"><span class="tr-end">🏁</span>${dots}<span class="tr-seg ${pk.done ? 'done' : ''}"></span><span class="tr-end summit-end ${pk.done ? 'reached' : ''}">${pk.done ? '🚩' : '🏔️'}</span></div>`;
   }
 
-  function metricBlock(pk) {
-    const v = metricValue(pk);
-    const m = pk.metric || {};
-    const pct = v && v.target > 0 ? Math.min(100, Math.round((v.cur / v.target) * 100)) : null;
-    const show = v ? `<div class="metric">
-        <div class="row between"><span class="small">📊 ${v.label} <b>${fmtMetric(v, v.cur)}</b>${v.target ? ` / ${fmtMetric(v, v.target)}` : ''}</span>${pct !== null ? `<b class="small">${pct}%</b>` : ''}</div>
-        ${pct !== null ? `<div class="bar thin" style="margin-top:4px"><i style="width:${pct}%"></i></div>` : '<p class="hint">목표 숫자를 적어 주세요.</p>'}
-        ${pct === 100 && !pk.done ? `<button class="btn sm" style="margin-top:6px" data-act="peak-toggle" data-id="${pk.id}">🎉 목표 숫자 도달! 넘었다고 체크</button>` : ''}
-      </div>` : '';
-    if (pk.done) return show;
-    return `${show}<details class="metric-set" data-peak-details="${pk.id}" ${openMetric === pk.id || (m.type && !(v && v.target) && m.type !== 'debt') ? 'open' : ''}><summary>📊 숫자로 재기${m.type ? ' · 바꾸기' : ''}</summary>
-      <select data-peak="${pk.id}" data-field="metric.type">${Object.entries(METRICS).map(([k, l]) => `<option value="${k}" ${(m.type || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      ${m.type && m.type !== 'debt' ? `<div class="row" style="margin-top:6px">
-        ${m.type === 'manual' ? `<input data-peak="${pk.id}" data-field="metric.current" value="${esc(m.current ?? '')}" inputmode="decimal" placeholder="지금 (예: 35)" style="flex:1;min-width:90px">` : ''}
-        <input data-peak="${pk.id}" data-field="metric.target" value="${m.target ? (m.type === 'manual' ? m.target : num(m.target).toLocaleString('ko-KR')) : ''}" placeholder="${m.type === 'manual' ? '목표 (예: 100)' : '목표 금액 (예: 300만)'}" ${m.type === 'manual' ? 'inputmode="decimal"' : 'enterkeyhint="done"'} style="flex:1;min-width:110px">
-        ${m.type === 'manual' ? `<input data-peak="${pk.id}" data-field="metric.unit" value="${esc(m.unit || '')}" placeholder="단위 (명)" style="width:84px;flex:none">` : ''}
-      </div>` : ''}
-      ${m.type === 'debt' ? '<p class="hint">돈 탭의 빚 챌린지 기록으로 자동 계산돼요.</p>' : ''}
-    </details>`;
-  }
-
   /* ---------- 📈 한 달 점검 ---------- */
   const SCORES = [[0, '제자리'], [25, '조금'], [50, '절반쯤'], [75, '많이'], [100, '훌쩍']];
   let ckDraft = null;   // 점검 입력 중인 값
-  let openMetric = null; // 숫자 설정을 펼쳐 둔 작은 산
   let ckPick = null;    // 그래프에서 고른 달
 
   function checkinChart(list) {
@@ -338,7 +299,6 @@
       ${steps.map((st, i) => `<div class="step ${st.done ? 'done' : ''} ${cs && st.id === cs.id ? 'here' : ''}">
         <input type="checkbox" data-act="step-toggle" data-id="${pk.id}" data-sid="${st.id}" ${st.done ? 'checked' : ''} aria-label="이뤘어요">
         <textarea class="step-text grow-text" rows="1" data-peak="${pk.id}" data-step="${st.id}" aria-label="작은 목표">${esc(st.text)}</textarea>
-        ${cs && st.id === cs.id ? `<button class="icon-btn" data-act="peak-today" data-id="${pk.id}" data-sid="${st.id}" aria-label="오늘 할 일로" title="오늘 할 일로">📌</button>` : ''}
         <span class="mv-pair"><button class="mv" data-act="step-move" data-id="${pk.id}" data-sid="${st.id}" data-n="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로">▲</button><button class="mv" data-act="step-move" data-id="${pk.id}" data-sid="${st.id}" data-n="1" ${i === steps.length - 1 ? 'disabled' : ''} aria-label="아래로">▼</button></span>
         <button class="icon-btn" data-act="step-del" data-id="${pk.id}" data-sid="${st.id}" aria-label="삭제">✕</button>
       </div>`).join('')}
@@ -371,7 +331,6 @@
           ${pk.done ? `<span class="tag done-tag">🚩 ${ym(pk.doneDate)} 정상 도착</span>` : `<label class="due ${late(pk) ? 'late' : ''}">목표 <input type="month" data-peak="${pk.id}" data-field="due" value="${esc(pk.due || '')}"></label>`}
         </div>
         ${stepsBlock(pk)}
-        ${metricBlock(pk)}
       </div>`).join('')}
       <form class="add-task" data-form="peak" data-h="${h}" style="margin-top:10px">
         <input name="peak" placeholder="${list.length ? '다음 작은 산 추가' : '목표까지 가는 중간 지점 (예: 웹소설 영상화 되기)'}" autocomplete="off">
@@ -866,10 +825,6 @@
     window.scrollTo(0, 0);
   }
   window.addEventListener('popstate', syncFromHash);
-  document.addEventListener('toggle', (e) => {
-    const d = e.target;
-    if (d.dataset && d.dataset.peakDetails) openMetric = d.open ? d.dataset.peakDetails : (openMetric === d.dataset.peakDetails ? null : openMetric);
-  }, true);
   window.addEventListener('hashchange', syncFromHash);
 
   let toastTimer;
@@ -1133,19 +1088,6 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.act === 'pick-goal') { newGoal = el.value; return; }
-    if (el.dataset.peak && el.dataset.field?.startsWith('metric.')) {
-      const pk = findPeak(el.dataset.peak);
-      if (!pk) return;
-      const m = (pk.metric = pk.metric || {});
-      const key = el.dataset.field.slice(7);
-      openMetric = pk.id;
-      if (key === 'type') { m.type = el.value; if (m.type === 'income_total' && !m.since) m.since = today(); }
-      else if (key === 'target') m.target = m.type === 'manual' ? num(el.value) : parseMoney(el.value);
-      else if (key === 'current') m.current = num(el.value);
-      else m[key] = el.value.trim();
-      save(); render();
-      return;
-    }
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk.due = el.value; save(); render(); }
@@ -1230,7 +1172,6 @@
       if (r) { r.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
       return;
     }
-    if (el.dataset.peak && el.dataset.field?.startsWith('metric.')) return; // 칸을 떠날 때(change) 저장
     if (el.dataset.peak && el.dataset.field !== 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk[el.dataset.field] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
