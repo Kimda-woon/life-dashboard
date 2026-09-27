@@ -3,6 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
+  const APP_VERSION = '2026.09.27.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -802,6 +803,7 @@
 
       <section class="card">
         <div class="card-head"><h2>💾 백업</h2></div>
+        <p class="muted small">버전 ${APP_VERSION}</p>
         <p class="muted small">기록은 이 브라우저에만 저장돼요. 폰과 컴퓨터를 옮기거나 브라우저 기록을 지우기 전에 꼭 내보내 두세요.</p>
         <div class="row" style="margin-top:12px">
           <button class="btn" data-act="export">⬇️ 내보내기</button>
@@ -1360,11 +1362,29 @@
     reader.readAsText(file);
   }
 
+  /* ---------- 새 버전 확인 ---------- */
+  // 홈 화면 앱은 예전 파일을 오래 붙잡고 있어서, 열 때마다 새 버전이 있는지 직접 확인하고 있으면 다시 불러옴
+  async function checkUpdate() {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return;
+      const { v } = await r.json();
+      if (!v || v === APP_VERSION) return;
+      const tried = sessionStorage.getItem('ld-update');
+      if (tried === v) return; // 같은 버전으로 한 번만 시도 (무한 새로고침 방지)
+      if ($('#dlg').hasAttribute('open') || document.activeElement?.matches('input, textarea, select')) return; // 입력 중이면 다음에
+      sessionStorage.setItem('ld-update', v);
+      location.replace(location.pathname + '?v=' + encodeURIComponent(v) + location.hash);
+    } catch (e) { /* 인터넷이 없으면 그냥 지금 버전으로 */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
+
   /* ---------- 시작 ---------- */
   applyPendingWeek();
   rollPeriods();
   save();
   render();
+  checkUpdate();
 
   // 탭을 켜둔 채 날짜·시간이 바뀌면 화면 갱신 (2~5시 알림 포함)
   let lastStamp = today() + new Date().getHours();
