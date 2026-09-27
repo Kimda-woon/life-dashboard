@@ -216,6 +216,7 @@ textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
 }
 .h10 .label { background: var(--blue-soft); color: var(--blue); }
 .h5 .label { background: var(--gold-soft); color: var(--gold); }
+.h3 .label { background: var(--good-soft); color: var(--good); }
 .h1 .label { background: var(--accent-soft); color: var(--accent); }
 .down { text-align: center; color: var(--muted); font-size: 13px; margin: 6px 0; }
 .goal { display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 10px; background: var(--soft); border-radius: 12px; margin-top: 6px; }
@@ -248,6 +249,8 @@ dialog {
   box-shadow: 0 20px 60px rgba(0,0,0,.25);
 }
 dialog::backdrop { background: rgba(0,0,0,.4); }
+/* <dialog>를 모르는 옛 브라우저: 아래 메뉴 위에 떠 있게 */
+dialog.fallback { position: fixed; inset: 16px 0 auto; margin: 0 auto; max-height: calc(100% - 32px); overflow: auto; z-index: 30; }
 .dlg { padding: 20px; }
 .dlg h2 { margin-bottom: 4px; }
 .dlg .row.end { margin-top: 18px; }
@@ -353,6 +356,53 @@ body.typing .tabs { display: none; }
 .guide-steps { margin: 8px 0 0; padding-left: 20px; font-size: 13px; }
 .guide-steps li { margin-top: 4px; }
 
-/* 작은 산이 많아도 산길이 화면 밖으로 넘치지 않게 */
+/* 작은 목표가 많아도 산길이 화면 밖으로 넘치지 않게 */
 .trail { overflow: hidden; }
 .tr-dot { flex-shrink: 1; min-width: 12px; }
+.tr-seg.done { background: var(--good); }
+.summit-end.reached { font-size: 20px; }
+
+/* 산마다 작은 목표 */
+.steps-box { margin: 8px 0 0 30px; padding: 8px 10px; background: var(--card); border-radius: 10px; }
+.steps-box .trail { margin: 8px 0 6px; }
+.step { display: flex; align-items: center; gap: 4px; margin-top: 4px; border-radius: 8px; }
+.step.here { background: var(--accent-soft); }
+.step input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--good); flex: none; margin: 0 4px; }
+.step .step-text { flex: 1; min-width: 0; min-height: 36px; padding: 4px 6px; border: 0; background: transparent; font-size: 14px; }
+.step .step-text:focus { background: var(--soft); }
+.step.done .step-text { text-decoration: line-through; color: var(--muted); }
+.add-step { display: flex; gap: 6px; margin-top: 6px; }
+.add-step input { flex: 1; min-width: 0; min-height: 38px; font-size: 14px; padding: 6px 10px; }
+.icon-btn:disabled { opacity: .25; cursor: default; }
+.step .icon-btn { width: 30px; height: 32px; }
+
+/* 매주 루틴 */
+.rt-head, .rt-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; justify-items: center; }
+.rt-head { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.rt-head .today { color: var(--accent); font-weight: 800; }
+.rt-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; justify-items: center; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.rt-name { grid-column: 1 / -1; justify-self: stretch; display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-bottom: 2px; }
+.rt-name b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.rt-name input { flex: 1; min-width: 0; min-height: 36px; padding: 4px 8px; font-size: 14px; }
+.rt-count { flex: none; }
+.rt-row.ok .rt-count { color: var(--good); font-weight: 700; }
+.rt-day { width: 34px; height: 34px; max-width: 100%; border-radius: 50%; border: 2px solid var(--line); background: var(--card); padding: 0; font-weight: 800; font-size: 14px; color: #fff; cursor: pointer; }
+.rt-day.today { border-color: var(--accent); }
+.rt-day.on { background: var(--good); border-color: var(--good); }
+.rt-day:disabled { opacity: .35; cursor: default; }
+.rt-tools { grid-column: 1 / -1; justify-self: stretch; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.rt-tools select { width: auto; min-height: 34px; padding: 2px 8px; font-size: 13px; }
+
+/* 위·아래 순서 버튼 (세로로 겹쳐 좁게) */
+.mv-pair { display: inline-flex; flex-direction: column; flex: none; gap: 2px; }
+.mv-pair .mv { width: 32px; height: 20px; padding: 0; border: 1px solid var(--line); background: var(--card); border-radius: 6px; font-size: 9px; line-height: 1; color: var(--muted); cursor: pointer; }
+.mv-pair .mv:disabled { opacity: .3; cursor: default; }
+@media (max-width: 400px) {
+  .steps-box { margin-left: 0; }
+  .metric, .metric-set, .peak-meta { margin-left: 4px; }
+}
+
+/* 여러 줄로 늘어나는 제목 칸 */
+.grow-text { word-break: keep-all; overflow-wrap: anywhere; resize: none; overflow: hidden; line-height: 1.35; font-family: inherit; display: block; }
+.peak .peak-text.grow-text, .step .step-text.grow-text { min-height: 36px; padding: 7px 6px; }
+@media (max-width: 400px) { .peak-top { gap: 6px; } }
