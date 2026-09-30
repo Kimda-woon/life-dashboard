@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.30.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.09.30.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -68,6 +68,29 @@
     { id: 'wn', name: '웹소설', batch: 5, next: 1, eps: [] },
     { id: 'sn', name: '숏노블', batch: 5, next: 1, eps: [] },
   ];
+  // 올해의 큰 구조 (비전 탭 맨 위, 고치기 가능)
+  const DEFAULT_STRUCTURE = () => ({
+    title: '회사와 드라마를 중심에 두고, 나머지는 최소 규칙으로 유지하는 1년',
+    areas: [
+      ['회사', '생계 + AI/이러닝 경력', '주 5일'],
+      ['드라마', '필요한 목돈 확보', '1년 한정 집중'],
+      ['발자취', '퍼스널 브랜딩 + 워크숍 고객 유입', '주 1회, 약 4시간'],
+      ['웹소설', '반자동 수익 + 실전 사례', '주 5화'],
+      ['숏노블', '반자동 수익 + 실전 사례', '주 5화'],
+      ['영어', '회화·커리어·자료 접근', '주 2회'],
+      ['운동', '건강·체력', '주 2회'],
+      ['경제', '돈 관리 역량', '주 1회'],
+    ].map(([name, role, cadence], i) => ({ id: 'a' + i, name, role, cadence })),
+    dropped: [
+      ['AI 공부', '실제 업무하면서 익히기'],
+      ['마케팅 공부', '발자취 운영에 흡수'],
+      ['웹소설·숏드라마 보기', '출퇴근 input'],
+      ['디지털 템플릿', '취미, 필수 일정 아님'],
+      ['커뮤니티', '당분간 우선순위 밖'],
+      ['사업 준비', '당분간 우선순위 밖'],
+    ].map(([text, note], i) => ({ id: 'd' + i, text, note })),
+    principle: '새로운 공부나 프로젝트를 이 틀 위에 계속 추가하지 않는다.',
+  });
   const catList = () => state.cats;
   const catOf = (id) => state.cats.find((c) => c.id === id) || state.cats.find((c) => c.id === 'etc');
   const SOURCES = ['외주·알바', '웹소설·숏노블', '워크숍·강의', '전자책·템플릿', '드라마', '기타'];
@@ -97,6 +120,8 @@
     rules: DEFAULT_RULES(),                       // 요일별 규칙
     ruleLog: {},                                  // 규칙 체크 {날짜: [규칙 id]}
     serials: DEFAULT_SERIALS(),                   // 연재 작품과 화별 상태 (out 출력 완료 → checked 검수 완료 → reserved 예약 완료)
+    structure: DEFAULT_STRUCTURE(),               // 올해의 큰 구조
+    parked: [],                                   // 보류함 [{id, text, note, created}]
     reviews: [],
   });
 
@@ -118,6 +143,9 @@
     for (let d = 0; d < 7; d++) if (!Array.isArray(out.rules[d])) out.rules[d] = [];
     if (!out.ruleLog || typeof out.ruleLog !== 'object') out.ruleLog = {};
     if (!Array.isArray(out.serials)) out.serials = DEFAULT_SERIALS();
+    if (!out.structure || !Array.isArray(out.structure.areas)) out.structure = DEFAULT_STRUCTURE();
+    if (!Array.isArray(out.structure.dropped)) out.structure.dropped = [];
+    if (!Array.isArray(out.parked)) out.parked = [];
     // 예전 '다음 한 걸음'은 그 산의 첫 작은 목표로 옮김
     Object.values(out.vision.peaks).forEach((list) => (list || []).forEach((pk) => {
       if (!Array.isArray(pk.steps)) pk.steps = pk.next ? [{ id: uid(), text: pk.next, done: false, doneDate: '' }] : [];
@@ -461,6 +489,7 @@
           <input name="task" placeholder="할 일을 적고 Enter" autocomplete="off" id="task-input">
           <button class="btn primary">추가</button>
         </form>
+        <div class="row between" style="margin-top:6px"><span class="hint" style="margin:0">틀 밖의 새 일·공부라면 일정 대신 보류함에</span><button type="button" class="btn sm ghost" data-act="park-input">🅿️ 보류함에</button></div>
         <div class="chips" style="margin-top:10px" role="radiogroup" aria-label="종류">
           ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
         </div>
@@ -473,6 +502,8 @@
         </div>` : ''}
         ${catList().map(lane).join('')}
       </section>
+
+      ${parkedCard()}
     </div>`;
   }
 
@@ -533,6 +564,69 @@
           ${lastRes ? `<p class="hint">예약 완료: ${lastRes}화까지 · 누적 ${res.length}화</p>` : ''}
         </div>`;
       }).join('')}
+    </section>`;
+  }
+
+  /* ---------- 🅿️ 보류함 ---------- */
+  let parkEditing = false;
+  let parkOpen = false; // 보류함을 펼쳐 둔 상태 (다시 그려도 유지)
+  document.addEventListener('toggle', (e) => { if (e.target.dataset?.keep === 'parked') parkOpen = e.target.open; }, true);
+  function parkedCard() {
+    const list = state.parked;
+    return `<section class="card parked" id="parked">
+      <details ${parkOpen ? 'open' : ''} data-keep="parked">
+        <summary><h2 style="display:inline">🅿️ 보류함</h2> <span class="muted">${list.length ? `${list.length}개` : '비어 있어요'}</span></summary>
+        <p class="muted small" style="margin-top:6px">하고 싶지만 지금 틀에는 안 넣는 것들이에요. 버리지 않고 여기 모아 두고, 틀이 여유로워지면 꺼내요.</p>
+        ${list.map((x) => `<div class="pk-item">
+          ${parkEditing
+            ? `<input data-parked="${x.id}" data-field="text" value="${esc(x.text)}" aria-label="보류한 일">
+               <input data-parked="${x.id}" data-field="note" value="${esc(x.note || '')}" placeholder="메모 (예: 드라마 끝나면)" aria-label="메모" class="pk-note-in">`
+            : `<div class="pk-text"><b>${esc(x.text)}</b>${x.note ? `<span class="muted small">${esc(x.note)}</span>` : ''}<span class="muted small">${shortDate(x.created)} 보류</span></div>`}
+          <div class="pk-acts">
+            <button class="btn sm ghost" data-act="park-out" data-id="${x.id}">↩︎ 할 일로</button>
+            <button class="icon-btn" data-act="park-del" data-id="${x.id}" aria-label="삭제">✕</button>
+          </div>
+        </div>`).join('')}
+        <form class="set-add" data-form="park" style="margin-top:10px"><input name="park" placeholder="보류할 일 (예: 디지털 템플릿 만들기)" autocomplete="off"><button class="btn sm">보류</button></form>
+        ${list.length ? `<button class="btn sm ghost" style="margin-top:8px" data-act="park-edit">${parkEditing ? '✓ 고치기 끝' : '✎ 고치기'}</button>` : ''}
+      </details>
+    </section>`;
+  }
+
+  /* ---------- 🧭 올해의 큰 구조 ---------- */
+  let structEditing = false;
+  function structureCard() {
+    const S = state.structure;
+    if (!structEditing) {
+      return `<section class="card structure">
+        <div class="card-head"><h2>🗺️ 올해의 큰 구조</h2><button class="btn sm ghost" data-act="struct-edit">✎ 고치기</button></div>
+        ${S.title ? `<p class="st-title">${esc(S.title)}</p>` : ''}
+        <div class="st-areas">${S.areas.map((a) => `<div class="st-area"><div class="row between"><b>${esc(a.name)}</b><span class="st-cad">${esc(a.cadence)}</span></div>${a.role ? `<span class="muted small">${esc(a.role)}</span>` : ''}</div>`).join('')}</div>
+        ${S.dropped.length ? `<details class="st-drop"><summary class="muted small">일정에서 뺀 것 ${S.dropped.length}개</summary>
+          <ul>${S.dropped.map((d) => `<li><b>${esc(d.text)}</b>${d.note ? ` → <span class="muted">${esc(d.note)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}
+        ${S.principle ? `<p class="st-principle">📌 ${esc(S.principle)}</p>` : ''}
+      </section>`;
+    }
+    const row = (kind, x, i, len, fields) => `<div class="st-edit-row">
+      <div class="st-edit-fields">${fields}</div>
+      <span class="mv-pair"><button class="mv" data-act="struct-move" data-kind="${kind}" data-id="${x.id}" data-n="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로">▲</button><button class="mv" data-act="struct-move" data-kind="${kind}" data-id="${x.id}" data-n="1" ${i === len - 1 ? 'disabled' : ''} aria-label="아래로">▼</button></span>
+      <button class="icon-btn" data-act="struct-del" data-kind="${kind}" data-id="${x.id}" aria-label="삭제">✕</button>
+    </div>`;
+    return `<section class="card structure editing">
+      <div class="card-head"><h2>🗺️ 올해의 큰 구조</h2><button class="btn sm primary" data-act="struct-edit">✓ 고치기 끝</button></div>
+      <label class="why"><span>한 줄 요약</span><textarea class="grow-text st-long" rows="1" data-struct="title">${esc(S.title)}</textarea></label>
+      <h3 style="margin-top:14px">영역 · 역할 · 운영</h3>
+      ${S.areas.map((a, i) => row('areas', a, i, S.areas.length, `
+        <div class="row"><input data-struct="areas" data-id="${a.id}" data-field="name" value="${esc(a.name)}" placeholder="영역" style="flex:1;min-width:0"><input data-struct="areas" data-id="${a.id}" data-field="cadence" value="${esc(a.cadence)}" placeholder="운영 (예: 주 2회)" style="flex:1;min-width:0"></div>
+        <input data-struct="areas" data-id="${a.id}" data-field="role" value="${esc(a.role)}" placeholder="역할" style="margin-top:4px">`)).join('')}
+      <button class="btn sm" data-act="struct-add" data-kind="areas" style="margin-top:8px">+ 영역 더하기</button>
+      <h3 style="margin-top:16px">일정에서 뺀 것</h3>
+      ${S.dropped.map((d, i) => row('dropped', d, i, S.dropped.length, `
+        <input data-struct="dropped" data-id="${d.id}" data-field="text" value="${esc(d.text)}" placeholder="뺀 것 (예: AI 공부)">
+        <input data-struct="dropped" data-id="${d.id}" data-field="note" value="${esc(d.note)}" placeholder="대신 어떻게 (예: 일하면서 익히기)" style="margin-top:4px">`)).join('')}
+      <button class="btn sm" data-act="struct-add" data-kind="dropped" style="margin-top:8px">+ 뺀 것 더하기</button>
+      <label class="why" style="margin-top:14px"><span>지킬 원칙</span><textarea class="grow-text st-long" rows="1" data-struct="principle">${esc(S.principle)}</textarea></label>
+      <button class="btn sm ghost" data-act="struct-reset" style="margin-top:12px">처음 내용으로 되돌리기</button>
     </section>`;
   }
 
@@ -679,6 +773,8 @@
     const climbing = HORIZONS.map(([h, label]) => [label, currentPeak(h)]).filter(([, pk]) => pk);
 
     return `<div class="stack">
+      ${structureCard()}
+
       <p class="muted">멀리서부터 적고, 가까운 것부터 실행해요. 적는 즉시 저장돼요.</p>
 
       <section class="card summit">
@@ -1120,6 +1216,50 @@
         toast(`목표를 ${ym(pk.due)}로 다시 잡았어요`);
         break;
       }
+      case 'park-input': {
+        const input = $('#task-input');
+        const text = (input?.value || '').trim();
+        if (!text) { toast('보류할 일을 위 칸에 먼저 적어 주세요'); input?.focus(); return; }
+        state.parked.unshift({ id: uid(), text, note: '', created: today() });
+        input.value = '';
+        toast('🅿️ 보류함에 넣었어요. 틀은 그대로!');
+        break;
+      }
+      case 'park-out': {
+        const x = state.parked.find((p) => p.id === id);
+        if (!x || !confirm(`'${x.text}'을(를) 오늘 할 일로 꺼낼까요? 틀에 새 일을 더하는 거예요.`)) return;
+        state.tasks.push({ id: uid(), text: x.text, cat: 'etc', goalId: null, peakId: null, stepId: null, done: false, created: today(), doneDate: null });
+        state.parked = state.parked.filter((p) => p.id !== id);
+        toast('↩︎ 할 일(기타)로 옮겼어요');
+        break;
+      }
+      case 'park-del': if (!confirm('보류함에서 지울까요?')) return; state.parked = state.parked.filter((p) => p.id !== id); break;
+      case 'park-edit': parkEditing = !parkEditing; parkOpen = true; render(); return;
+      case 'struct-edit':
+        structEditing = !structEditing;
+        if (!structEditing) { // 비워 둔 줄은 정리
+          state.structure.areas = state.structure.areas.filter((a) => a.name.trim() || a.role.trim() || a.cadence.trim());
+          state.structure.dropped = state.structure.dropped.filter((d) => d.text.trim() || d.note.trim());
+          save();
+        }
+        render(); if (structEditing) document.querySelector('.structure')?.scrollIntoView({ block: 'start' }); return;
+      case 'struct-add': {
+        const k = el.dataset.kind;
+        const item = k === 'areas' ? { id: uid(), name: '', role: '', cadence: '' } : { id: uid(), text: '', note: '' };
+        state.structure[k].push(item);
+        save(); render();
+        document.querySelector(`[data-struct="${k}"][data-id="${item.id}"]`)?.focus();
+        return;
+      }
+      case 'struct-move': if (!moveIn(state.structure[el.dataset.kind], id, Number(el.dataset.n))) return; break;
+      case 'struct-del': {
+        const k = el.dataset.kind;
+        const x = state.structure[k].find((y) => y.id === id);
+        if (x && (x.name || x.text) && !confirm(`'${x.name || x.text}'을(를) 지울까요?`)) return;
+        state.structure[k] = state.structure[k].filter((y) => y.id !== id);
+        break;
+      }
+      case 'struct-reset': if (!confirm('올해의 큰 구조를 처음 내용으로 되돌릴까요? 고친 내용은 사라져요.')) return; state.structure = DEFAULT_STRUCTURE(); break;
       case 'rule-tick': {
         const t = today();
         const log = state.ruleLog[t] || [];
@@ -1353,6 +1493,17 @@
       if (st) { st.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
       return;
     }
+    if (el.dataset.struct) {
+      const S = state.structure, k = el.dataset.struct;
+      if (el.dataset.id) { const x = S[k].find((y) => y.id === el.dataset.id); if (x) x[el.dataset.field] = el.value; } else S[k] = el.value;
+      clearTimeout(bindTimer); bindTimer = setTimeout(save, 300);
+      return;
+    }
+    if (el.dataset.parked) {
+      const x = state.parked.find((y) => y.id === el.dataset.parked);
+      if (x) { x[el.dataset.field] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
+      return;
+    }
     if (el.dataset.rule) {
       const r = rulesOf(el.dataset.ruleDay).find((x) => x.id === el.dataset.rule);
       if (r) { r.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
@@ -1432,6 +1583,15 @@
       state.routines.push({ id: uid(), text, perWeek: Math.min(7, Math.max(1, num(val('per')) || 1)), days: [] });
       save();
       render('[name=routine]');
+      return;
+    }
+    if (kind === 'park') {
+      const text = val('park');
+      if (!text) return;
+      state.parked.unshift({ id: uid(), text, note: '', created: today() });
+      parkOpen = true;
+      save(); render('#parked [name=park]');
+      toast('🅿️ 보류함에 넣었어요');
       return;
     }
     if (kind === 'rule') {
