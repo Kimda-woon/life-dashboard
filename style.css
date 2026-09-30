@@ -437,3 +437,30 @@ body.typing .tabs { display: none; }
 .set-work:first-of-type { border-top: 0; }
 .set-work label { display: inline-flex; align-items: center; gap: 6px; }
 .link-ic { flex: none; font-size: 13px; width: 18px; text-align: center; }
+
+/* 🗺️ 올해의 큰 구조 */
+.st-title { font-weight: 700; margin-bottom: 8px; }
+.st-areas { display: grid; gap: 6px; }
+.st-area { background: var(--soft); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.st-cad { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; margin-left: 8px; }
+.st-drop { margin-top: 10px; }
+.st-drop summary { cursor: pointer; }
+.st-drop ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+.st-drop li { margin-top: 4px; }
+.st-principle { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-weight: 700; font-size: 14px; }
+.st-edit-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.st-edit-fields { flex: 1; min-width: 0; }
+.st-edit-fields input { min-height: 38px; padding: 6px 8px; font-size: 14px; }
+.structure.editing .why input { min-height: 40px; }
+
+/* 🅿️ 보류함 */
+.parked summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 8px; }
+.parked summary::-webkit-details-marker { display: none; }
+.parked summary::after { content: '▾'; margin-left: auto; color: var(--muted); }
+.parked details[open] summary::after { content: '▴'; }
+.pk-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.pk-item:first-of-type { border-top: 0; }
+.pk-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pk-item > input { flex: 1 1 100%; min-height: 38px; padding: 6px 8px; font-size: 14px; }
+.pk-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.structure .st-long { min-height: 44px; padding: 10px 12px; font-size: 15px; }
