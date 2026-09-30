@@ -188,7 +188,6 @@ textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
   display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
   background: var(--blue-soft); color: var(--blue); margin-left: 4px; vertical-align: 2px; white-space: nowrap;
 }
-.tag.old { background: var(--gold-soft); color: var(--gold); }
 
 /* onboarding */
 .steps { list-style: none; padding: 0; margin: 10px 0 0; }
@@ -464,3 +463,17 @@ body.typing .tabs { display: none; }
 .pk-item > input { flex: 1 1 100%; min-height: 38px; padding: 6px 8px; font-size: 14px; }
 .pk-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .structure .st-long { min-height: 44px; padding: 10px 12px; font-size: 15px; }
+
+/* 📅 할 일 마감 */
+.due-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.due-chips .chip { padding: 6px 12px; font-size: 13px; }
+.due-chips .chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.due-other, .due-pick { position: relative; overflow: hidden; cursor: pointer; }
+.due-other input, .due-pick input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.due-pick { flex: none; display: inline-flex; align-items: center; }
+.due-add { font-size: 15px; opacity: .45; padding: 4px 6px; }
+.due-tag { font-size: 12px; font-weight: 700; white-space: nowrap; padding: 3px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); }
+.due-tag.soon { background: var(--accent-soft); color: var(--accent); }
+.due-tag.over { background: var(--accent); color: #fff; }
+.due-line { display: block; margin-top: 4px; }
+.due-line .due-pick { display: inline-flex; }

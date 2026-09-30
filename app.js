@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.30.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.09.30.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -447,7 +447,8 @@
     const visible = state.tasks.filter((x) => !x.done || x.doneDate === t);
 
     const lane = (c) => {
-      const items = visible.filter((x) => catOf(x.cat).id === c.id).sort((a, b) => a.done - b.done);
+      const items = visible.filter((x) => catOf(x.cat).id === c.id)
+        .sort((a, b) => a.done - b.done || (a.due || '9999').localeCompare(b.due || '9999'));
       return `<div class="lane">
         <div class="lane-head"><h3>${esc(c.icon)} ${esc(c.label)}</h3>${items.length ? `<span class="muted">${items.filter((x) => !x.done).length}개</span>` : ''}</div>
         ${items.length ? items.map(taskRow).join('') : '<div class="lane-empty">비어 있어요</div>'}
@@ -486,10 +487,15 @@
         <div class="card-head"><h2>✅ 오늘 할 일</h2><button class="btn sm ghost" data-act="go-cats">종류 바꾸기</button></div>
         ${pendingPeak && findPeak(pendingPeak) ? `<div class="peak-link">⛰️ <b>${esc(findPeak(pendingPeak).text)}</b>${pendingStep && findStep(findPeak(pendingPeak), pendingStep) ? ` › ${esc(findStep(findPeak(pendingPeak), pendingStep).text)}` : ''}을(를) 위한 일로 넣어요. 끝내면 작은 목표도 함께 체크돼요. 종류를 고르고 <b>추가</b>를 누르세요. <button class="btn sm ghost" data-act="peak-unlink">연결 빼기</button></div>` : ''}
         <form class="add-task" data-form="task">
-          <input name="task" placeholder="할 일을 적고 Enter" autocomplete="off" id="task-input">
+          <input name="task" placeholder="예: 치과 예약 10/7까지" autocomplete="off" id="task-input">
           <button class="btn primary">추가</button>
         </form>
-        <div class="row between" style="margin-top:6px"><span class="hint" style="margin:0">틀 밖의 새 일·공부라면 일정 대신 보류함에</span><button type="button" class="btn sm ghost" data-act="park-input">🅿️ 보류함에</button></div>
+        <div class="due-chips" role="radiogroup" aria-label="마감">
+          <span class="muted small">마감</span>
+          ${[['', '없음'], [today(), '오늘'], [addDays(today(), 1), '내일'], [nextFri(), '금요일']].map(([v, l]) => `<button type="button" class="chip ${newDue === v ? 'on' : ''}" data-act="pick-due" data-v="${v}">${l}</button>`).join('')}
+          <label class="chip due-other ${newDue && ![today(), addDays(today(), 1), nextFri()].includes(newDue) ? 'on' : ''}">${newDue && ![today(), addDays(today(), 1), nextFri()].includes(newDue) ? shortDate(newDue) : '📅 날짜'}<input type="date" data-act="pick-due-date" value="${esc(newDue)}" min="${today()}"></label>
+        </div>
+        <div class="row between" style="margin-top:6px"><span class="hint" style="margin:0">"10/7까지"라고 적으면 마감이 자동으로 들어가요</span><button type="button" class="btn sm ghost" data-act="park-input" title="틀 밖의 새 일은 일정 대신 보류함에">🅿️ 보류</button></div>
         <div class="chips" style="margin-top:10px" role="radiogroup" aria-label="종류">
           ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
         </div>
@@ -668,14 +674,40 @@
     </section>`;
   }
 
+  /* ---------- 마감 ---------- */
+  let newDue = ''; // 새 할 일에 붙일 마감 (YYYY-MM-DD)
+  const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
+  // 이번 주 금요일 (금요일이 지났으면 다음 주 금요일)
+  const nextFri = () => { const t = today(); const d = (5 - parseYmd(t).getDay() + 7) % 7; return addDays(t, d); };
+  // "치과 예약 10/7까지", "서류 10월 7일까지", "~10/7" → 마감 날짜를 읽고 글에서는 뺌
+  function dueFromText(text) {
+    const m = text.match(/(?:~\s*)?(\d{1,2})\s*(?:\/|월\s*)(\d{1,2})\s*일?\s*(?:까지)?/);
+    if (!m || !(/까지|~/.test(m[0]))) return null;
+    const mo = Number(m[1]), da = Number(m[2]);
+    if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
+    const t = today();
+    let y = Number(t.slice(0, 4));
+    let d = `${y}-${pad(mo)}-${pad(da)}`;
+    if (daysBetween(t, d) < -30) d = `${y + 1}-${pad(mo)}-${pad(da)}`; // 한참 지난 날짜면 내년
+    const rest = text.replace(m[0], ' ').replace(/\s{2,}/g, ' ').trim();
+    return { due: d, text: rest || text };
+  }
+  function dueTag(x) {
+    const t = today();
+    const n = daysBetween(t, x.due);
+    const cls = x.done ? '' : n < 0 ? 'over' : n <= 1 ? 'soon' : '';
+    const left = x.done ? '' : n < 0 ? ` · ${-n}일 지남` : n === 0 ? ' · 오늘까지' : n === 1 ? ' · 내일까지' : ` · D-${n}`;
+    return `<span class="due-tag ${cls}">📅 ${shortDate(x.due)}${left}</span>`;
+  }
+
   function taskRow(x) {
     const t = today();
-    const days = x.created && x.created < t ? Math.round((parseYmd(t) - parseYmd(x.created)) / 864e5) : 0;
     const g = x.goalId && goalName(x.goalId);
     const pk = x.peakId && findPeak(x.peakId);
     return `<div class="task ${x.done ? 'done' : ''}">
       <input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료">
-      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${days && !x.done ? `<span class="tag old">${days}일째</span>` : ''}</span>
+      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<label class="due-pick" aria-label="마감 날짜 바꾸기">${dueTag(x)}<input type="date" data-task-due="${x.id}" value="${esc(x.due)}"></label>`}</span>` : ''}</span>
+      ${!x.due && !x.done ? `<label class="due-pick" aria-label="마감 날짜 넣기"><span class="due-add">📅</span><input type="date" data-task-due="${x.id}" value=""></label>` : ''}
       <button class="icon-btn" data-act="del-task" data-id="${x.id}" aria-label="삭제">✕</button>
     </div>`;
   }
@@ -1216,6 +1248,12 @@
         toast(`목표를 ${ym(pk.due)}로 다시 잡았어요`);
         break;
       }
+      case 'pick-due': {
+        newDue = el.dataset.v;
+        const keep = $('#task-input')?.value || '';
+        render(); const inp = $('#task-input'); if (inp) inp.value = keep;
+        return;
+      }
       case 'park-input': {
         const input = $('#task-input');
         const text = (input?.value || '').trim();
@@ -1403,6 +1441,17 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.act === 'pick-goal') { newGoal = el.value; return; }
+    if (el.dataset.act === 'pick-due-date') {
+      newDue = el.value || '';
+      const keep = $('#task-input')?.value || '';
+      render(); const inp = $('#task-input'); if (inp) inp.value = keep;
+      return;
+    }
+    if (el.dataset.taskDue) {
+      const x = state.tasks.find((t) => t.id === el.dataset.taskDue);
+      if (x) { x.due = el.value || ''; save(); render(); toast(x.due ? `📅 마감 ${shortDate(x.due)}` : '마감을 뺐어요'); }
+      return;
+    }
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk.due = el.value; save(); render(); }
@@ -1547,9 +1596,14 @@
     const val = (n) => (f.elements[n]?.value || '').trim();
 
     if (kind === 'task') {
-      const text = val('task');
+      let text = val('task');
       if (!text) return;
-      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, stepId: (pendingPeak && pendingStep) || null, done: false, created: today(), doneDate: null });
+      let due = newDue;
+      const parsed = dueFromText(text);
+      if (parsed) { text = parsed.text; due = due || parsed.due; }
+      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, stepId: (pendingPeak && pendingStep) || null, done: false, created: today(), doneDate: null, due: due || '' });
+      if (due) toast(`📅 ${shortDate(due)}까지로 넣었어요`);
+      newDue = '';
       pendingPeak = null;
       pendingStep = null;
       save();
