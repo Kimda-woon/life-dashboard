@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.01.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.01.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -146,6 +146,10 @@
     if (!out.structure || !Array.isArray(out.structure.areas)) out.structure = DEFAULT_STRUCTURE();
     if (!Array.isArray(out.structure.dropped)) out.structure.dropped = [];
     if (!Array.isArray(out.parked)) out.parked = [];
+    if (!out.vision.climbInit) {
+      Object.values(out.vision.peaks).forEach((list) => { const first = (list || []).find((pk) => !pk.done); if (first) first.climbing = true; });
+      out.vision.climbInit = true;
+    }
     // 예전 '다음 한 걸음'은 그 산의 첫 작은 목표로 옮김
     Object.values(out.vision.peaks).forEach((list) => (list || []).forEach((pk) => {
       if (!Array.isArray(pk.steps)) pk.steps = pk.next ? [{ id: uid(), text: pk.next, done: false, doneDate: '' }] : [];
@@ -258,7 +262,9 @@
     if (all && !pk.done) { pk.done = true; pk.doneDate = today(); toast('🏔️ 정상 도착! 작은 산 하나를 넘었어요'); }
     else if (undo && !all && pk.done) { pk.done = false; pk.doneDate = ''; }
   }
-  const currentPeak = (h) => (state.vision.peaks[h] || []).find((pk) => !pk.done);
+  // 지금 오르는 산: 산마다 켜고 끔 (여러 개 가능). 넘은 산은 빠짐
+  const climbingIn = (h) => (state.vision.peaks[h] || []).filter((pk) => pk.climbing && !pk.done);
+  const climbingAll = () => HORIZONS.flatMap(([h, label]) => climbingIn(h).map((pk) => ({ pk, h, label })));
   const ym = (s) => (s ? `${s.slice(0, 4)}.${s.slice(5, 7)}` : '');
 
   // 산 하나 = 1점. 작은 목표가 있으면 이룬 만큼 부분 점수
@@ -375,13 +381,12 @@
     const list = state.vision.peaks[h] || [];
     const done = list.filter((pk) => pk.done).length;
     const pct = peakPct(h) || 0;
-    const cur = currentPeak(h);
     const late = (pk) => !pk.done && pk.due && pk.due < today().slice(0, 7);
     return `<div class="peaks">
       <div class="row between"><h3>⛰️ 작은 산</h3>${list.length ? `<span class="muted small">${done}/${list.length} 넘음 · ${pct}%</span>` : ''}</div>
       ${list.length ? `<div class="bar thin" style="margin-top:6px"><i style="width:${pct}%"></i></div>` : ''}
-      ${list.length > 1 ? '<p class="hint" style="margin-top:4px">▲▼ 로 오를 순서를 바꿀 수 있어요. 맨 위의 안 넘은 산이 \'지금 여기\'예요.</p>' : ''}
-      ${list.map((pk, i) => `<div class="peak ${pk.done ? 'done' : ''} ${cur && pk.id === cur.id ? 'here' : ''}">
+      ${list.length ? '<p class="hint" style="margin-top:4px">🚶 버튼으로 지금 오르는 산을 여러 개 고를 수 있어요. ▲▼로 순서를 바꿔요.</p>' : ''}
+      ${list.map((pk, i) => `<div class="peak ${pk.done ? 'done' : ''} ${pk.climbing && !pk.done ? 'here' : ''}">
         <div class="peak-top">
           <input type="checkbox" data-act="peak-toggle" data-id="${pk.id}" ${pk.done ? 'checked' : ''} aria-label="넘었어요">
           <textarea class="peak-text grow-text" rows="1" data-peak="${pk.id}" data-field="text" aria-label="작은 산">${esc(pk.text)}</textarea>
@@ -389,7 +394,7 @@
           <button class="icon-btn" data-act="peak-del" data-id="${pk.id}" aria-label="삭제">✕</button>
         </div>
         <div class="peak-meta">
-          ${cur && pk.id === cur.id ? '<span class="tag here-tag">🚶 지금 여기</span>' : ''}
+          ${pk.done ? '' : `<button type="button" class="climb-btn ${pk.climbing ? 'on' : ''}" data-act="peak-climb" data-id="${pk.id}" aria-pressed="${pk.climbing ? 'true' : 'false'}">${pk.climbing ? '🚶 지금 오르는 중' : '＋ 지금 오르기'}</button>`}
           ${pk.done ? `<span class="tag done-tag">🚩 ${ym(pk.doneDate)} 정상 도착</span>` : `<label class="due ${late(pk) ? 'late' : ''}">목표 <input type="month" data-peak="${pk.id}" data-field="due" value="${esc(pk.due || '')}"></label>`}
         </div>
         ${stepsBlock(pk)}
@@ -468,10 +473,10 @@
       ${checkMonth() && !checkinFor(checkMonth()) && allPeaks().length ? `<section class="card accent"><div class="row between"><div><h2>📈 ${Number(checkMonth().slice(5))}월 점검할 때예요</h2><p class="muted">한 달 동안 산을 얼마나 올랐는지 1분만.</p></div><button class="btn primary sm" data-act="go-checkin">점검하기</button></div></section>` : ''}
       ${now.getDay() === 0 ? `<section class="card accent"><div class="row between"><div><h2>📝 오늘은 주간 리뷰 날</h2><p class="muted">5분만 써도 다음 주가 달라져요.</p></div><button class="btn primary sm" data-act="go" data-to="review">리뷰하기</button></div></section>` : ''}
 
-      ${(goals.length || weekItems.length || currentPeak('y1')) ? `<section class="card compass">
+      ${(goals.length || weekItems.length || climbingAll().length) ? `<section class="card compass">
         <div class="card-head"><h2>🧭 나침반</h2><button class="btn sm ghost" data-act="go" data-to="vision">비전 보기</button></div>
         ${goals.length ? `<p class="muted small">1년 목표</p><ul>${goals.map((g) => `<li class="compass-goal">${esc(g.text)}</li>`).join('')}</ul>` : ''}
-        ${currentPeak('y1') ? `<p class="muted small" style="margin-top:8px">⛰️ 지금 오르는 산 (1년)</p><ul><li class="compass-goal">${esc(currentPeak('y1').text)}${curStep(currentPeak('y1')) ? ` <span class="muted small">→ ${esc(curStep(currentPeak('y1')).text)}</span>` : ''}</li></ul>` : ''}
+        ${climbingAll().length ? `<p class="muted small" style="margin-top:8px">⛰️ 지금 오르는 산</p><ul>${climbingAll().map(({ pk, label }) => `<li class="compass-goal"><span class="tag" style="margin:0 6px 0 0">${label}</span>${esc(pk.text)}${curStep(pk) ? ` <span class="muted small">→ ${esc(curStep(pk).text)}</span>` : ''}</li>`).join('')}</ul>` : ''}
         ${weekItems.length ? `<p class="muted small" style="margin-top:8px">이번 주 핵심</p><ul>${weekItems.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
       </section>` : ''}
 
@@ -851,7 +856,7 @@
       ${peaksBlock(key)}
     </section>`;
     const conquered = allPeaks().filter((pk) => pk.done).sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
-    const climbing = HORIZONS.map(([h, label]) => [label, currentPeak(h)]).filter(([, pk]) => pk);
+    const climbing = climbingAll().map(({ pk, label }) => [label, pk]);
 
     return `<div class="stack">
       ${structureCard()}
@@ -1218,6 +1223,13 @@
         break;
       }
       case 'del-task': state.tasks = state.tasks.filter((t) => t.id !== id); break;
+      case 'peak-climb': {
+        const pk = findPeak(id);
+        if (!pk || pk.done) return;
+        pk.climbing = !pk.climbing;
+        toast(pk.climbing ? `🚶 '${pk.text}' 오르기 시작` : '지금 오르는 산에서 뺐어요');
+        break;
+      }
       case 'peak-toggle': {
         const pk = findPeak(id);
         if (!pk) return;
@@ -1660,7 +1672,7 @@
       const text = val('peak');
       if (!text) return;
       const h = f.dataset.h;
-      state.vision.peaks[h] = [...(state.vision.peaks[h] || []), { id: uid(), text, due: '', steps: [], done: false, doneDate: '' }];
+      state.vision.peaks[h] = [...(state.vision.peaks[h] || []), { id: uid(), text, due: '', steps: [], done: false, doneDate: '', climbing: !climbingIn(h).length }];
       save();
       render();
       $(`form[data-form=peak][data-h=${h}] input`)?.focus();
