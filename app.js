@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.27.5'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.09.30.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -46,13 +46,30 @@
   const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
   const shortDate = (s) => { const d = parseYmd(s); return `${d.getMonth() + 1}/${d.getDate()}(${DAYS[d.getDay()]})`; };
 
-  const CATS = {
-    now: { icon: '🔥', label: '오늘 돈 되는 일', hint: '이번 주 안에 입금으로 이어지는 일' },
-    soon: { icon: '🌱', label: '3개월 뒤 돈 되는 일', hint: '워크숍 · 전자책 · 템플릿 · 자동연재' },
-    bonus: { icon: '🎁', label: '보너스', hint: '드라마처럼 생계 밖의 큰 기회' },
-    grow: { icon: '📚', label: '성장', hint: '영어 · 운동 · 공부' },
-    etc: { icon: '📦', label: '기타', hint: '은행 · 병원 · 서류처럼 따로 처리할 일' },
-  };
+  // 할 일 종류 (설정에서 추가·삭제). '기타'는 지운 종류의 일이 모이는 곳이라 지울 수 없음
+  const DEFAULT_CATS = () => [
+    { id: 'drama', icon: '🎬', label: '드라마' },
+    { id: 'footprint', icon: '👣', label: '발자취' },
+    { id: 'serial', icon: '📚', label: '연재' },
+    { id: 'etc', icon: '📦', label: '기타' },
+  ];
+  // 요일별 규칙 (0=일 … 6=토). kind가 있으면 연재 보드에서 한 일로 자동 체크
+  const DEFAULT_RULES = () => ({
+    1: [{ id: 'r-mon', text: '💰 경제' }],
+    2: [{ id: 'r-tue', text: '🏃 운동' }],
+    3: [{ id: 'r-wed', text: '🗣️ 영어' }],
+    4: [{ id: 'r-thu', text: '🏃 운동' }],
+    5: [{ id: 'r-fri', text: '🗣️ 영어' }],
+    6: [{ id: 'r-sat1', text: '🎬 드라마' }, { id: 'r-sat2', text: '👣 발자취 1회 발행' }],
+    0: [{ id: 'r-sun1', text: '🎬 드라마' }, { id: 'r-sun2', text: '📅 지난주 검수분 예약', kind: 'reserve' },
+      { id: 'r-sun3', text: '📤 웹소설 5화 출력', kind: 'out', work: 'wn' }, { id: 'r-sun4', text: '📤 숏노블 5화 출력', kind: 'out', work: 'sn' }],
+  });
+  const DEFAULT_SERIALS = () => [
+    { id: 'wn', name: '웹소설', batch: 5, next: 1, eps: [] },
+    { id: 'sn', name: '숏노블', batch: 5, next: 1, eps: [] },
+  ];
+  const catList = () => state.cats;
+  const catOf = (id) => state.cats.find((c) => c.id === id) || state.cats.find((c) => c.id === 'etc');
   const SOURCES = ['외주·알바', '웹소설·숏노블', '워크숍·강의', '전자책·템플릿', '드라마', '기타'];
   const FIXED_PRESETS = ['월세', '관리비', '통신비', '보험', '카드 할부', '식비', '교통비', '강아지 사료', '강아지 병원', '구독료'];
 
@@ -76,6 +93,10 @@
       week: { key: '', items: ['', '', ''], prev: [] },
     },
     routines: [],                                 // 매주 루틴 [{id, text, perWeek, days:[날짜]}]
+    cats: DEFAULT_CATS(),                         // 할 일 종류
+    rules: DEFAULT_RULES(),                       // 요일별 규칙
+    ruleLog: {},                                  // 규칙 체크 {날짜: [규칙 id]}
+    serials: DEFAULT_SERIALS(),                   // 연재 작품과 화별 상태 (out 출력 완료 → checked 검수 완료 → reserved 예약 완료)
     reviews: [],
   });
 
@@ -86,6 +107,17 @@
     ['quarter', 'month', 'week', 'why', 'peaks'].forEach((k) => { out.vision[k] = { ...base.vision[k], ...(out.vision[k] || {}) }; });
     if (out.vision.y3 == null) out.vision.y3 = '';
     if (!Array.isArray(out.routines)) out.routines = [];
+    // 회사 생활 규칙으로 바뀌기 전 기록: 옛 할 일 종류를 새 종류로 옮김 (보너스 → 드라마, 나머지 → 기타)
+    if (!Array.isArray(data.cats) || !data.cats.length) {
+      out.cats = DEFAULT_CATS();
+      (out.tasks || []).forEach((t) => { t.cat = t.cat === 'bonus' ? 'drama' : 'etc'; });
+    }
+    if (!out.cats.some((c) => c.id === 'etc')) out.cats.push({ id: 'etc', icon: '📦', label: '기타' });
+    (out.tasks || []).forEach((t) => { if (!out.cats.some((c) => c.id === t.cat)) t.cat = 'etc'; });
+    if (!out.rules || typeof out.rules !== 'object') out.rules = DEFAULT_RULES();
+    for (let d = 0; d < 7; d++) if (!Array.isArray(out.rules[d])) out.rules[d] = [];
+    if (!out.ruleLog || typeof out.ruleLog !== 'object') out.ruleLog = {};
+    if (!Array.isArray(out.serials)) out.serials = DEFAULT_SERIALS();
     // 예전 '다음 한 걸음'은 그 산의 첫 작은 목표로 옮김
     Object.values(out.vision.peaks).forEach((list) => (list || []).forEach((pk) => {
       if (!Array.isArray(pk.steps)) pk.steps = pk.next ? [{ id: uid(), text: pk.next, done: false, doneDate: '' }] : [];
@@ -154,18 +186,20 @@
     const we = addDays(ws, 6);
     const inWeek = (d) => d && d >= ws && d <= we;
     const done = state.tasks.filter((t) => t.done && inWeek(t.doneDate));
-    let slotDays = 0;
-    for (let i = 0; i < 7; i++) { const s = state.slots[addDays(ws, i)]; if (s && s.done) slotDays++; }
+    let ruleDoneN = 0, ruleTotal = 0;
+    for (let i = 0; i < 7; i++) { const d = addDays(ws, i); if (d > today()) break; const k = dayScore(d); ruleDoneN += k.done; ruleTotal += k.total; }
+    const eps = state.serials.flatMap((w) => w.eps);
     return {
       income: sum(state.incomes.filter((i) => inWeek(i.date))),
       paid: sum(state.debt.payments.filter((p) => inWeek(p.date))),
       done: done.length,
-      fire: done.filter((t) => t.cat === 'now').length,
+      rules: `${ruleDoneN}/${ruleTotal}`,
+      checked: eps.filter((e) => inWeek(e.chk)).length,
+      reserved: eps.filter((e) => inWeek(e.res)).length,
       linked: done.filter((t) => t.goalId || t.peakId).length,
       peaks: allPeaks().filter((pk) => pk.done && inWeek(pk.doneDate)).length,
       steps: allPeaks().reduce((a, pk) => a + (pk.steps || []).filter((st) => st.done && inWeek(st.doneDate)).length, 0),
       routine: state.routines.length ? `${state.routines.filter((r) => routineCount(r, ws) >= r.perWeek).length}/${state.routines.length}` : '-',
-      slotDays,
     };
   }
 
@@ -362,7 +396,7 @@
   }
 
   /* ---------- 오늘 ---------- */
-  let newCat = 'now';
+  let newCat = null;
   let pendingPeak = null; // '오늘 할 일로' 누른 작은 산
   let pendingStep = null; // 그 산의 작은 목표
   let newGoal = '';
@@ -370,10 +404,8 @@
   function renderToday() {
     const t = today();
     const now = new Date();
-    const hour = now.getHours();
-    const inSlot = hour >= 14 && hour < 17;
-    const slot = state.slots[t] || { text: '', done: false };
     const v = state.vision;
+    if (!catList().some((c) => c.id === newCat)) newCat = catList()[0].id;
     const goals = v.goals.filter((g) => !g.done);
     const weekItems = v.week.items.filter(Boolean);
 
@@ -385,15 +417,12 @@
     const showOnboard = !state.onboardDismissed && steps.some((s) => !s.ok);
 
     const visible = state.tasks.filter((x) => !x.done || x.doneDate === t);
-    const fireOpen = visible.filter((x) => x.cat === 'now' && !x.done).length;
-    const fireDoneToday = visible.filter((x) => x.cat === 'now' && x.done).length;
 
-    const lane = (cat) => {
-      const items = visible.filter((x) => x.cat === cat).sort((a, b) => a.done - b.done);
-      const dim = cat !== 'now' && cat !== 'etc' && fireOpen > 0 && fireDoneToday === 0;
-      return `<div class="lane ${dim ? 'dim' : ''}">
-        <div class="lane-head"><h3>${CATS[cat].icon} ${CATS[cat].label}</h3><span class="muted">${CATS[cat].hint}</span></div>
-        ${items.length ? items.map(taskRow).join('') : `<div class="lane-empty">${cat === 'now' ? '오늘 돈으로 이어질 일을 하나 적어 보세요.' : '비어 있어요'}</div>`}
+    const lane = (c) => {
+      const items = visible.filter((x) => catOf(x.cat).id === c.id).sort((a, b) => a.done - b.done);
+      return `<div class="lane">
+        <div class="lane-head"><h3>${esc(c.icon)} ${esc(c.label)}</h3>${items.length ? `<span class="muted">${items.filter((x) => !x.done).length}개</span>` : ''}</div>
+        ${items.length ? items.map(taskRow).join('') : '<div class="lane-empty">비어 있어요</div>'}
       </div>`;
     };
 
@@ -417,35 +446,23 @@
         ${weekItems.length ? `<p class="muted small" style="margin-top:8px">이번 주 핵심</p><ul>${weekItems.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
       </section>` : ''}
 
-      <section class="card ${inSlot && !slot.done ? 'slot-live' : ''}">
-        <div class="card-head"><h2>⏰ 2시~5시, 딱 한 가지</h2><span class="muted">${inSlot ? '<b style="color:var(--accent)">지금이 그 시간!</b>' : hour < 14 ? '미리 정해두기' : '오늘의 기록'}</span></div>
-        ${slot.text && !slotEditing
-          ? `<div class="task ${slot.done ? 'done' : ''}" style="margin-top:0">
-              <input type="checkbox" data-act="slot-done" ${slot.done ? 'checked' : ''} aria-label="끝냈어요">
-              <span class="t"><b>${esc(slot.text)}</b></span>
-              <button class="icon-btn" data-act="slot-edit" aria-label="고치기">✎</button>
-            </div>
-            <p class="hint">${slot.done ? '👏 해냈어요. 오후를 지켜냈어요.' : '휴대폰은 멀리, 25분 타이머 켜고 이것만.'}</p>`
-          : `<form class="add-task" data-form="slot">
-              <input name="slot" value="${esc(slot.text)}" placeholder="예: 외주 원고 1편 초안 끝내기" autocomplete="off">
-              <button class="btn fire">정하기</button>
-            </form>
-            <p class="hint">점심 먹고 늘어지기 쉬운 시간이에요. 아침에 미리 한 가지만 정해두세요.</p>`}
-      </section>
+      ${rulesCard()}
+
+      ${serialCard()}
 
       ${survivalCard(true)}
 
       ${routineCard()}
 
       <section class="card">
-        <div class="card-head"><h2>✅ 오늘 할 일</h2><span class="muted">생계 일부터</span></div>
+        <div class="card-head"><h2>✅ 오늘 할 일</h2><button class="btn sm ghost" data-act="go-cats">종류 바꾸기</button></div>
         ${pendingPeak && findPeak(pendingPeak) ? `<div class="peak-link">⛰️ <b>${esc(findPeak(pendingPeak).text)}</b>${pendingStep && findStep(findPeak(pendingPeak), pendingStep) ? ` › ${esc(findStep(findPeak(pendingPeak), pendingStep).text)}` : ''}을(를) 위한 일로 넣어요. 끝내면 작은 목표도 함께 체크돼요. 종류를 고르고 <b>추가</b>를 누르세요. <button class="btn sm ghost" data-act="peak-unlink">연결 빼기</button></div>` : ''}
         <form class="add-task" data-form="task">
           <input name="task" placeholder="할 일을 적고 Enter" autocomplete="off" id="task-input">
           <button class="btn primary">추가</button>
         </form>
         <div class="chips" style="margin-top:10px" role="radiogroup" aria-label="종류">
-          ${Object.entries(CATS).map(([k, c]) => `<label class="chip-radio"><input type="radio" name="cat" value="${k}" data-act="pick-cat" ${newCat === k ? 'checked' : ''}><span>${c.icon} ${c.label}</span></label>`).join('')}
+          ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
         </div>
         ${goals.length ? `<div class="row" style="margin-top:10px">
           <span class="muted small">어느 1년 목표를 위한 일?</span>
@@ -454,10 +471,69 @@
             ${goals.map((g) => `<option value="${g.id}" ${newGoal === g.id ? 'selected' : ''}>${esc(g.text)}</option>`).join('')}
           </select>
         </div>` : ''}
-        ${fireOpen > 0 && fireDoneToday === 0 ? `<div class="lock-note">🔥 생계 일 하나를 먼저 끝내면 나머지 칸이 밝아져요.</div>` : ''}
-        ${Object.keys(CATS).map(lane).join('')}
+        ${catList().map(lane).join('')}
       </section>
     </div>`;
+  }
+
+  /* ---------- 📅 오늘의 규칙 ---------- */
+  const rulesOf = (d) => state.rules[d] || [];
+  // 규칙을 지켰는지: 직접 체크했거나, 연재 보드에서 그날 그 일을 했으면 자동으로 지킨 것
+  function ruleDone(r, date) {
+    if ((state.ruleLog[date] || []).includes(r.id)) return true;
+    if (r.kind === 'reserve') return state.serials.some((w) => w.eps.some((e) => e.res === date));
+    if (r.kind === 'out') return state.serials.some((w) => (!r.work || w.id === r.work) && w.eps.some((e) => e.out === date));
+    return false;
+  }
+  const dayScore = (date) => { const l = rulesOf(parseYmd(date).getDay()); return { done: l.filter((r) => ruleDone(r, date)).length, total: l.length }; };
+
+  function rulesCard() {
+    const t = today();
+    const dow = parseYmd(t).getDay();
+    const list = rulesOf(dow);
+    const sc = dayScore(t);
+    const weekday = dow >= 1 && dow <= 5;
+    const ws = weekStart();
+    return `<section class="card rules">
+      <div class="card-head"><h2>📅 오늘의 규칙 · ${DAYS[dow]}요일</h2>${list.length ? `<span class="muted">${sc.done}/${sc.total}</span>` : ''}</div>
+      ${weekday ? '<p class="rule-base">🏢 회사 · 🚇 이동시간은 검수 또는 input</p>' : ''}
+      ${list.map((r) => { const d = ruleDone(r, t); const auto = d && !(state.ruleLog[t] || []).includes(r.id); return `<div class="task ${d ? 'done' : ''}">
+        <input type="checkbox" data-act="rule-tick" data-id="${r.id}" ${d ? 'checked' : ''} ${auto ? 'disabled' : ''} aria-label="지켰어요">
+        <span class="t">${esc(r.text)}${auto ? '<span class="tag">연재 보드에서 자동</span>' : ''}</span>
+      </div>`; }).join('')}
+      ${!list.length ? '<p class="muted small">오늘은 정해 둔 규칙이 없어요.</p>' : ''}
+      ${dow === 0 ? `<p class="hint">${sc.total && sc.done === sc.total ? '🛋️ 다 했어요! 남은 반나절은 푹 쉬어요.' : '반나절 안에 끝내고, 나머지 반나절은 쉬어요.'}</p>` : ''}
+      <div class="rule-week">${weekDays(ws).map((d) => { const k = dayScore(d); const full = k.total && k.done === k.total; return `<span class="${d === t ? 'today' : ''} ${full ? 'full' : k.done ? 'part' : ''} ${d > t ? 'future' : ''}"><b>${DAYS[parseYmd(d).getDay()]}</b><i>${d > t ? '' : full ? '✓' : k.total ? `${k.done}/${k.total}` : '-'}</i></span>`; }).join('')}</div>
+      <button class="btn sm ghost" style="margin-top:8px" data-act="go-rules">✎ 요일별 규칙 고치기</button>
+    </section>`;
+  }
+
+  /* ---------- 📚 연재 보드 ---------- */
+  const findWork = (id) => state.serials.find((w) => w.id === id);
+  const epsBy = (w, st) => w.eps.filter((e) => e.st === st).sort((a, b) => a.n - b.n);
+
+  function serialCard() {
+    if (!state.serials.length) return '';
+    const dow = new Date().getDay();
+    return `<section class="card serial">
+      <div class="card-head"><h2>📚 연재</h2></div>
+      <p class="muted small" style="margin:-4px 0 6px">일요일 출력 → 평일 검수 → 다음 일요일 예약</p>
+      <div class="sr-legend"><span><i class="ep-sw out"></i>출력 완료 · 누르면 검수 완료</span><span><i class="ep-sw checked"></i>검수 완료</span></div>
+      ${state.serials.map((w) => {
+        const out = epsBy(w, 'out'), chk = epsBy(w, 'checked'), res = epsBy(w, 'reserved');
+        const lastRes = res.length ? res[res.length - 1].n : null;
+        const from = w.next, to = w.next + w.batch - 1;
+        return `<div class="sr-work">
+          <div class="row between"><b>${esc(w.name)}</b><span class="muted small">검수 대기 <b>${out.length}</b> · 검수 완료 <b>${chk.length}</b></span></div>
+          ${out.length || chk.length ? `<div class="sr-eps">${[...out, ...chk].sort((a, b) => a.n - b.n).map((e) => `<button class="ep ${e.st}" data-act="ep-tick" data-w="${w.id}" data-n="${e.n}" aria-label="${e.n}화 ${e.st === 'out' ? '검수 완료로' : '검수 대기로 되돌리기'}">${e.st === 'checked' ? '✓ ' : ''}${e.n}화</button>`).join('')}</div>` : '<p class="muted small" style="margin-top:6px">검수할 화가 없어요.</p>'}
+          <div class="sr-actions">
+            <button class="btn sm ${dow === 0 ? 'primary' : ''}" data-act="sr-out" data-w="${w.id}">📤 ${from}~${to}화 출력</button>
+            <button class="btn sm ${dow === 0 && chk.length ? 'good' : ''}" data-act="sr-reserve" data-w="${w.id}" ${chk.length ? '' : 'disabled'}>📅 검수분 예약${chk.length ? ` (${chk.length}화)` : ''}</button>
+          </div>
+          ${lastRes ? `<p class="hint">예약 완료: ${lastRes}화까지 · 누적 ${res.length}화</p>` : ''}
+        </div>`;
+      }).join('')}
+    </section>`;
   }
 
   /* ---------- 🔁 매주 루틴 ---------- */
@@ -509,7 +585,6 @@
       <button class="icon-btn" data-act="del-task" data-id="${x.id}" aria-label="삭제">✕</button>
     </div>`;
   }
-  let slotEditing = false;
 
   /* ---------- 돈 ---------- */
   function renderMoney() {
@@ -683,8 +758,8 @@
         <div class="grid2">
           <div class="stat"><b>${man(st.income)}</b><span>💰 들어온 돈</span></div>
           <div class="stat"><b>${man(st.paid)}</b><span>✅ 갚은 빚</span></div>
-          <div class="stat"><b>${st.fire}개</b><span>🔥 끝낸 생계 일</span></div>
-          <div class="stat"><b>${st.slotDays}/7일</b><span>⏰ 2~5시 지킨 날</span></div>
+          <div class="stat"><b>${st.rules}</b><span>📅 지킨 규칙</span></div>
+          <div class="stat"><b>${st.checked}화 · ${st.reserved}화</b><span>📚 검수 · 예약</span></div>
           <div class="stat"><b>${st.done}개</b><span>✅ 끝낸 일 전체</span></div>
           <div class="stat"><b>${st.done ? Math.round((st.linked / st.done) * 100) : 0}%</b><span>🎯 목표와 연결된 일</span></div>
           <div class="stat"><b>${st.peaks}개</b><span>⛰️ 넘은 작은 산</span></div>
@@ -720,7 +795,7 @@
 
       ${past.length ? `<section class="card">
         <div class="card-head"><h2>🗂️ 지난 리뷰</h2></div>
-        ${past.map((p) => `<details class="review"><summary>${shortDate(p.week)} 주 · 💰 ${man(p.stats?.income || 0)} · 🔥 ${p.stats?.fire || 0}개</summary>
+        ${past.map((p) => `<details class="review"><summary>${shortDate(p.week)} 주 · 💰 ${man(p.stats?.income || 0)} · ${p.stats?.rules ? `📅 규칙 ${p.stats.rules}` : `🔥 ${p.stats?.fire || 0}개`}</summary>
           <div class="body">${p.wins ? `잘한 것\n${esc(p.wins)}\n\n` : ''}${p.lesson ? `배운 것\n${esc(p.lesson)}\n\n` : ''}${p.next.filter(Boolean).length ? `다음 주 핵심\n${p.next.filter(Boolean).map((n) => '· ' + esc(n)).join('\n')}` : ''}</div>
         </details>`).join('')}
       </section>` : ''}
@@ -733,10 +808,11 @@
       <section class="card guide">
         <div class="card-head"><h2>📖 사용법</h2></div>
         <ol>
-          <li><b>처음 한 번</b>: 돈 탭에서 고정비와 빚 목표 날짜, 비전 탭에서 1년 목표를 적어요.</li>
-          <li><b>매일 아침</b>: 오늘 탭에서 '2시~5시 한 가지'를 정하고, 🔥 생계 일부터 적어요.</li>
+          <li><b>처음 한 번</b>: 돈 탭에서 고정비와 빚 목표 날짜, 비전 탭에서 1년 목표를 적어요. 요일별 규칙과 할 일 종류는 이 화면 아래에서 바꿀 수 있어요.</li>
+          <li><b>매일</b>: 오늘 탭의 📅 오늘의 규칙을 체크해요. 출퇴근길에 검수한 화는 📚 연재에서 눌러 검수 완료로 옮겨요.</li>
+          <li><b>일요일</b>: 📚 연재에서 검수분 예약 → 다음 5화 출력. 반나절 안에 끝내고 쉬어요.</li>
           <li><b>돈이 오가면</b>: 돈 탭의 💰 / ✅ 버튼을 눌러 기록해요. 생존선과 빚 게이지가 자동으로 움직여요.</li>
-          <li><b>일요일</b>: 주간 리뷰 5분. 다음 주 핵심 3개가 비전 탭으로 넘어가요.</li>
+          <li><b>주말</b>: 주간 리뷰 5분. 지킨 규칙과 연재 화수가 자동으로 모여요.</li>
           <li><b>한 달에 한 번</b>: 비전 탭을 다시 읽고 이번 달 목표를 적어요.</li>
         </ol>
       </section>
@@ -746,6 +822,48 @@
         <input data-bind="debt.start" data-type="money" data-money inputmode="text" enterkeyhint="done" value="${num(state.debt.start).toLocaleString('ko-KR')}">
         <p class="hint">숫자로 적거나 "500만"처럼 적어도 돼요.</p>
         <p class="hint">챌린지를 시작할 때의 총 빚이에요. 새로 생긴 빚이 있으면 여기서 늘려 주세요.</p>
+      </section>
+
+      <section class="card" id="rules-set">
+        <div class="card-head"><h2>📅 요일별 규칙</h2></div>
+        <p class="muted small">오늘 탭의 '오늘의 규칙'에 요일마다 나오는 목록이에요. 평일엔 '회사 · 이동시간은 검수 또는 input'이 늘 함께 보여요.</p>
+        ${[1, 2, 3, 4, 5, 6, 0].map((d) => `<div class="set-day">
+          <b class="set-day-name ${d === 0 || d === 6 ? 'we' : ''}">${DAYS[d]}</b>
+          <div class="set-day-list">
+            ${rulesOf(d).map((r) => `<div class="set-row">
+              <input data-rule-day="${d}" data-rule="${r.id}" value="${esc(r.text)}" aria-label="${DAYS[d]}요일 규칙">
+              ${r.kind ? '<span class="link-ic" title="연재 보드와 연결">🔗</span>' : ''}
+              <button class="icon-btn" data-act="rule-del" data-day="${d}" data-id="${r.id}" aria-label="삭제">✕</button>
+            </div>`).join('')}
+            <form class="set-add" data-form="rule" data-day="${d}"><input name="rule" placeholder="+ 규칙 더하기" autocomplete="off"><button class="btn sm">추가</button></form>
+          </div>
+        </div>`).join('')}
+        <p class="hint">🔗 표시는 연재 보드와 연결된 규칙이에요. 그날 예약·출력을 하면 저절로 체크돼요.</p>
+      </section>
+
+      <section class="card" id="cats-set">
+        <div class="card-head"><h2>🏷️ 할 일 종류</h2></div>
+        <p class="muted small">오늘 할 일을 나누는 칸이에요. 지운 종류의 일은 📦 기타로 옮겨져요.</p>
+        ${catList().map((c, i) => `<div class="set-row">
+          <input class="set-icon" data-cat="${esc(c.id)}" data-field="icon" value="${esc(c.icon)}" aria-label="아이콘" maxlength="4">
+          <input data-cat="${esc(c.id)}" data-field="label" value="${esc(c.label)}" aria-label="이름">
+          <span class="mv-pair"><button class="mv" data-act="cat-move" data-id="${esc(c.id)}" data-n="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로">▲</button><button class="mv" data-act="cat-move" data-id="${esc(c.id)}" data-n="1" ${i === catList().length - 1 ? 'disabled' : ''} aria-label="아래로">▼</button></span>
+          ${c.id === 'etc' ? '<span class="icon-btn" aria-hidden="true"></span>' : `<button class="icon-btn" data-act="cat-del" data-id="${esc(c.id)}" aria-label="삭제">✕</button>`}
+        </div>`).join('')}
+        <form class="set-add" data-form="cat"><input class="set-icon" name="icon" placeholder="🏷️" maxlength="4" aria-label="아이콘"><input name="label" placeholder="새 종류 (예: 영어)" autocomplete="off"><button class="btn sm">추가</button></form>
+      </section>
+
+      <section class="card" id="serials-set">
+        <div class="card-head"><h2>📚 연재 작품</h2></div>
+        <p class="muted small">'다음 출력'은 다음에 출력할 화 번호예요. 처음 쓸 때 지금 연재 중인 화 번호로 맞춰 주세요.</p>
+        ${state.serials.map((w) => `<div class="set-work">
+          <div class="set-row"><input data-work="${w.id}" data-field="name" value="${esc(w.name)}" aria-label="작품 이름"><button class="icon-btn" data-act="work-del" data-id="${w.id}" aria-label="삭제">✕</button></div>
+          <div class="row" style="margin-top:6px">
+            <label class="small">다음 출력 <input data-work="${w.id}" data-field="next" value="${w.next}" inputmode="numeric" style="width:70px;min-height:36px;padding:4px 8px">화</label>
+            <label class="small">한 번에 <select data-work="${w.id}" data-field="batch" style="width:auto;min-height:36px;padding:2px 8px">${[1, 2, 3, 4, 5, 6, 7, 10].map((n) => `<option value="${n}" ${w.batch === n ? 'selected' : ''}>${n}화</option>`).join('')}</select></label>
+          </div>
+        </div>`).join('')}
+        <form class="set-add" data-form="work" style="margin-top:10px"><input name="work" placeholder="+ 작품 더하기" autocomplete="off"><button class="btn sm">추가</button></form>
       </section>
 
       <section class="card" id="transfer">
@@ -916,7 +1034,7 @@
         if (!x) return;
         x.done = !x.done;
         x.doneDate = x.done ? today() : null;
-        if (x.done) toast(x.cat === 'now' ? '🔥 생계 일 하나 끝! 잘했어요' : '✅ 끝!');
+        if (x.done) toast('✅ 끝!');
         // 작은 목표에 연결된 일을 끝내면 그 작은 목표도 체크
         const pk = x.peakId && findPeak(x.peakId), st = findStep(pk, x.stepId);
         if (x.done && st && !st.done) { st.done = true; st.doneDate = today(); if (!pk.done) toast(`🪜 작은 목표 "${st.text}" 이뤘어요`); syncPeakDone(pk); }
@@ -1002,6 +1120,69 @@
         toast(`목표를 ${ym(pk.due)}로 다시 잡았어요`);
         break;
       }
+      case 'rule-tick': {
+        const t = today();
+        const log = state.ruleLog[t] || [];
+        state.ruleLog[t] = log.includes(id) ? log.filter((x) => x !== id) : [...log, id];
+        // 오래된 기록은 반년 치만 보관
+        const cut = addDays(t, -183);
+        Object.keys(state.ruleLog).forEach((d) => { if (d < cut) delete state.ruleLog[d]; });
+        const sc = dayScore(t);
+        if (!log.includes(id) && sc.total && sc.done === sc.total) toast(new Date().getDay() === 0 ? '🛋️ 오늘 규칙 끝! 이제 쉬어요' : '📅 오늘 규칙 다 지켰어요!');
+        break;
+      }
+      case 'go-rules': go('settings'); $('#rules-set')?.scrollIntoView({ block: 'start' }); return;
+      case 'go-cats': go('settings'); $('#cats-set')?.scrollIntoView({ block: 'start' }); return;
+      case 'ep-tick': {
+        const w = findWork(el.dataset.w);
+        const e = w && w.eps.find((x) => x.n === Number(el.dataset.n));
+        if (!e) return;
+        if (e.st === 'out') { e.st = 'checked'; e.chk = today(); } else if (e.st === 'checked') { e.st = 'out'; e.chk = ''; }
+        break;
+      }
+      case 'sr-out': {
+        const w = findWork(el.dataset.w);
+        if (!w) return;
+        const from = w.next, to = w.next + w.batch - 1;
+        if (!confirm(`${w.name} ${from}~${to}화를 출력했나요?`)) return;
+        for (let n = from; n <= to; n++) if (!w.eps.some((x) => x.n === n)) w.eps.push({ n, st: 'out', out: today(), chk: '', res: '' });
+        w.next = to + 1;
+        toast(`📤 ${w.name} ${from}~${to}화 출력 완료 · 평일에 검수해요`);
+        break;
+      }
+      case 'sr-reserve': {
+        const w = findWork(el.dataset.w);
+        const chk = w ? epsBy(w, 'checked') : [];
+        if (!chk.length || !confirm(`${w.name} 검수 완료 ${chk.length}화(${chk[0].n}~${chk[chk.length - 1].n}화)를 예약했나요?`)) return;
+        chk.forEach((e) => { e.st = 'reserved'; e.res = today(); });
+        // 예약 끝난 화는 최근 50화만 보관
+        const res = epsBy(w, 'reserved');
+        if (res.length > 50) { const keep = new Set(res.slice(-50)); w.eps = w.eps.filter((e) => e.st !== 'reserved' || keep.has(e)); }
+        toast(`📅 ${w.name} ${chk.length}화 예약 완료`);
+        break;
+      }
+      case 'rule-del': {
+        const d = el.dataset.day;
+        if (!confirm('이 규칙을 지울까요?')) return;
+        state.rules[d] = rulesOf(d).filter((r) => r.id !== id);
+        break;
+      }
+      case 'cat-move': if (!moveIn(state.cats, id, Number(el.dataset.n))) return; break;
+      case 'cat-del': {
+        const c = state.cats.find((x) => x.id === id);
+        if (!c || id === 'etc') return;
+        const n = state.tasks.filter((t) => t.cat === id && !t.done).length;
+        if (!confirm(`'${c.label}' 종류를 지울까요?${n ? ` 남은 할 일 ${n}개는 기타로 옮겨져요.` : ''}`)) return;
+        state.tasks.forEach((t) => { if (t.cat === id) t.cat = 'etc'; });
+        state.cats = state.cats.filter((x) => x.id !== id);
+        break;
+      }
+      case 'work-del': {
+        const w = findWork(id);
+        if (!w || !confirm(`'${w.name}' 작품을 지울까요? 이 작품의 화별 기록도 지워져요.`)) return;
+        state.serials = state.serials.filter((x) => x.id !== id);
+        break;
+      }
       case 'go-transfer': go('settings'); $('#transfer')?.scrollIntoView({ block: 'start' }); return;
       case 'copy-state': {
         const text = TRANSFER_TAG + JSON.stringify(state);
@@ -1054,12 +1235,6 @@
         break;
       }
       case 'ck-pick': ckPick = Number(el.dataset.i); render(); $('#checkin')?.scrollIntoView({ block: 'nearest' }); return;
-      case 'slot-done': {
-        const s = state.slots[today()];
-        if (s) { s.done = !s.done; if (s.done) toast('⏰ 오후를 지켜냈어요!'); }
-        break;
-      }
-      case 'slot-edit': slotEditing = true; render('[name=slot]'); return;
       case 'open-amount': return openAmount(el.dataset.kind);
       case 'del-income': if (!confirm('이 수입 기록을 지울까요?')) return; state.incomes = state.incomes.filter((i) => i.id !== id); break;
       case 'del-pay': if (!confirm('이 상환 기록을 지울까요?')) return; state.debt.payments = state.debt.payments.filter((p) => p.id !== id); break;
@@ -1091,6 +1266,17 @@
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk.due = el.value; save(); render(); }
+      return;
+    }
+    if (el.dataset.work && el.dataset.field === 'batch') {
+      const w = findWork(el.dataset.work);
+      if (w) { w.batch = num(el.value) || 5; save(); }
+      return;
+    }
+    if (el.dataset.cat && el.dataset.field === 'label' && !el.value.trim()) {
+      const c = state.cats.find((x) => x.id === el.dataset.cat);
+      if (c) { c.label = '이름 없음'; save(); render(); }
+      toast('이름을 비워 둘 수 없어요');
       return;
     }
     if (el.dataset.routinePer) {
@@ -1167,6 +1353,24 @@
       if (st) { st.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
       return;
     }
+    if (el.dataset.rule) {
+      const r = rulesOf(el.dataset.ruleDay).find((x) => x.id === el.dataset.rule);
+      if (r) { r.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
+      return;
+    }
+    if (el.dataset.cat) {
+      const c = state.cats.find((x) => x.id === el.dataset.cat);
+      if (c) { c[el.dataset.field] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
+      return;
+    }
+    if (el.dataset.work && el.dataset.field !== 'batch') {
+      const w = findWork(el.dataset.work);
+      if (w) {
+        if (el.dataset.field === 'next') { const n = Math.floor(num(el.value)); if (n >= 1) w.next = n; } else w.name = el.value;
+        clearTimeout(bindTimer); bindTimer = setTimeout(save, 300);
+      }
+      return;
+    }
     if (el.dataset.routine) {
       const r = state.routines.find((x) => x.id === el.dataset.routine);
       if (r) { r.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
@@ -1230,13 +1434,27 @@
       render('[name=routine]');
       return;
     }
-    if (kind === 'slot') {
-      const text = val('slot');
+    if (kind === 'rule') {
+      const text = val('rule');
       if (!text) return;
-      const cur = state.slots[today()];
-      state.slots[today()] = { text, done: cur ? cur.done : false };
-      slotEditing = false;
-      toast('⏰ 정했어요. 2시에 이것만 하면 돼요');
+      const d = f.dataset.day;
+      state.rules[d] = [...rulesOf(d), { id: uid(), text }];
+      save(); render(); $(`form[data-form=rule][data-day="${d}"] input`)?.focus();
+      return;
+    }
+    if (kind === 'cat') {
+      const label = val('label');
+      if (!label) return;
+      state.cats.push({ id: uid(), icon: val('icon') || '🏷️', label });
+      save(); render('#cats-set [name=label]');
+      return;
+    }
+    if (kind === 'work') {
+      const name = val('work');
+      if (!name) return;
+      state.serials.push({ id: uid(), name, batch: 5, next: 1, eps: [] });
+      save(); render('#serials-set [name=work]');
+      return;
     }
     if (kind === 'goal') {
       const text = val('goal');

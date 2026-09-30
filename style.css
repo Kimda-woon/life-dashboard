@@ -96,7 +96,6 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
 .card-head .muted { font-size: 13px; }
 .card.accent { border-color: var(--accent); background: linear-gradient(0deg, var(--card), var(--accent-soft)); }
-.card.slot-live { border: 2px solid var(--accent); }
 .hint { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
 .big { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.15; }
@@ -190,7 +189,6 @@ textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
   background: var(--blue-soft); color: var(--blue); margin-left: 4px; vertical-align: 2px; white-space: nowrap;
 }
 .tag.old { background: var(--gold-soft); color: var(--gold); }
-.lock-note { font-size: 13px; background: var(--accent-soft); color: var(--accent); border-radius: 10px; padding: 8px 12px; margin-top: 12px; }
 
 /* onboarding */
 .steps { list-style: none; padding: 0; margin: 10px 0 0; }
@@ -400,3 +398,42 @@ body.typing .tabs { display: none; }
 .grow-text { word-break: keep-all; overflow-wrap: anywhere; resize: none; overflow: hidden; line-height: 1.35; font-family: inherit; display: block; }
 .peak .peak-text.grow-text, .step .step-text.grow-text { min-height: 36px; padding: 7px 6px; }
 @media (max-width: 400px) { .peak-top { gap: 6px; } }
+
+/* 📅 오늘의 규칙 */
+.rule-base { font-size: 13px; color: var(--muted); background: var(--soft); border-radius: 10px; padding: 8px 10px; margin-bottom: 4px; }
+.rule-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 12px; }
+.rule-week span { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border-radius: 10px; background: var(--soft); font-size: 11px; color: var(--muted); }
+.rule-week b { font-size: 12px; }
+.rule-week i { font-style: normal; font-weight: 800; min-height: 14px; }
+.rule-week .today { outline: 2px solid var(--accent); }
+.rule-week .full { background: var(--good-soft); color: var(--good); }
+.rule-week .part i { color: var(--ink); }
+.rule-week .future { opacity: .5; }
+
+/* 📚 연재 보드 */
+.sr-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.sr-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ep-sw { width: 14px; height: 14px; border-radius: 5px; display: inline-block; border: 2px solid var(--line); background: var(--card); }
+.ep-sw.checked { background: var(--good); border-color: var(--good); }
+.sr-work { padding: 12px 0; border-top: 1px solid var(--line); }
+.sr-work:first-of-type { border-top: 0; }
+.sr-eps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ep { min-width: 58px; min-height: 40px; padding: 4px 10px; border-radius: 10px; border: 2px solid var(--line); background: var(--card); font-weight: 700; font-size: 14px; cursor: pointer; }
+.ep.checked { background: var(--good); border-color: var(--good); color: #fff; }
+.sr-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.sr-actions .btn:disabled { opacity: .4; }
+
+/* 설정: 규칙 · 종류 · 작품 */
+.set-day { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.set-day:first-of-type { border-top: 0; }
+.set-day-name { font-size: 15px; padding-top: 8px; text-align: center; }
+.set-day-name.we { color: var(--accent); }
+.set-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.set-row input { flex: 1; min-width: 0; min-height: 40px; padding: 6px 10px; font-size: 14px; }
+.set-row .set-icon, .set-add .set-icon { flex: none; width: 52px; text-align: center; padding: 6px 4px; }
+.set-add { display: flex; gap: 6px; margin-top: 6px; }
+.set-add input { flex: 1; min-width: 0; min-height: 40px; padding: 6px 10px; font-size: 14px; }
+.set-work { padding: 10px 0; border-top: 1px solid var(--line); }
+.set-work:first-of-type { border-top: 0; }
+.set-work label { display: inline-flex; align-items: center; gap: 6px; }
+.link-ic { flex: none; font-size: 13px; width: 18px; text-align: center; }
