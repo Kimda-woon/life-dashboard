@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.09.30.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.01.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -492,8 +492,8 @@
         </form>
         <div class="due-chips" role="radiogroup" aria-label="마감">
           <span class="muted small">마감</span>
-          ${[['', '없음'], [today(), '오늘'], [addDays(today(), 1), '내일'], [nextFri(), '금요일']].map(([v, l]) => `<button type="button" class="chip ${newDue === v ? 'on' : ''}" data-act="pick-due" data-v="${v}">${l}</button>`).join('')}
-          <label class="chip due-other ${newDue && ![today(), addDays(today(), 1), nextFri()].includes(newDue) ? 'on' : ''}">${newDue && ![today(), addDays(today(), 1), nextFri()].includes(newDue) ? shortDate(newDue) : '📅 날짜'}<input type="date" data-act="pick-due-date" value="${esc(newDue)}" min="${today()}"></label>
+          ${[['', '없음'], [today(), '오늘'], [addDays(today(), 1), '내일']].map(([v, l]) => `<button type="button" class="chip ${newDue === v ? 'on' : ''}" data-act="pick-due" data-v="${v}">${l}</button>`).join('')}
+          <button type="button" class="chip ${newDue && ![today(), addDays(today(), 1)].includes(newDue) ? 'on' : ''}" data-act="open-cal" data-id="new">📅 ${newDue && ![today(), addDays(today(), 1)].includes(newDue) ? shortDate(newDue) : '날짜'}</button>
         </div>
         <div class="row between" style="margin-top:6px"><span class="hint" style="margin:0">"10/7까지"라고 적으면 마감이 자동으로 들어가요</span><button type="button" class="btn sm ghost" data-act="park-input" title="틀 밖의 새 일은 일정 대신 보류함에">🅿️ 보류</button></div>
         <div class="chips" style="margin-top:10px" role="radiogroup" aria-label="종류">
@@ -677,8 +677,6 @@
   /* ---------- 마감 ---------- */
   let newDue = ''; // 새 할 일에 붙일 마감 (YYYY-MM-DD)
   const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
-  // 이번 주 금요일 (금요일이 지났으면 다음 주 금요일)
-  const nextFri = () => { const t = today(); const d = (5 - parseYmd(t).getDay() + 7) % 7; return addDays(t, d); };
   // "치과 예약 10/7까지", "서류 10월 7일까지", "~10/7" → 마감 날짜를 읽고 글에서는 뺌
   function dueFromText(text) {
     const m = text.match(/(?:~\s*)?(\d{1,2})\s*(?:\/|월\s*)(\d{1,2})\s*일?\s*(?:까지)?/);
@@ -692,6 +690,57 @@
     const rest = text.replace(m[0], ' ').replace(/\s{2,}/g, ' ').trim();
     return { due: d, text: rest || text };
   }
+  // 📅 앱 안 달력 (폰 기본 날짜 선택기는 아이폰에서 저절로 닫히는 문제가 있어 직접 그림)
+  let cal = null; // { target: 'new' | 할 일 id, month: 'YYYY-MM', cur: 'YYYY-MM-DD' }
+  function setDue(target, v) {
+    if (target === 'new') {
+      newDue = v;
+      const keep = $('#task-input')?.value || '';
+      render(); const inp = $('#task-input'); if (inp) inp.value = keep;
+      return;
+    }
+    const x = state.tasks.find((t) => t.id === target);
+    if (!x) return;
+    x.due = v;
+    save(); render();
+    toast(v ? `📅 마감 ${shortDate(v)}` : '마감 없음으로 바꿨어요');
+  }
+  function openCal(target) {
+    const cur = target === 'new' ? newDue : (state.tasks.find((t) => t.id === target) || {}).due || '';
+    cal = { target, cur, month: (cur || today()).slice(0, 7) };
+    drawCal();
+    openDlg($('#dlg'));
+  }
+  function drawCal() {
+    const [y, m] = cal.month.split('-').map(Number);
+    const startDow = new Date(y, m - 1, 1).getDay();
+    const last = new Date(y, m, 0).getDate();
+    const t = today();
+    const cells = [];
+    for (let i = 0; i < startDow; i++) cells.push('<span></span>');
+    for (let d = 1; d <= last; d++) {
+      const v = `${y}-${pad(m)}-${pad(d)}`;
+      const dow = (startDow + d - 1) % 7;
+      cells.push(`<button type="button" class="cal-day ${v === t ? 'today' : ''} ${v === cal.cur ? 'sel' : ''} ${v < t ? 'past' : ''} ${dow === 0 ? 'sun' : dow === 6 ? 'sat' : ''}" data-act="cal-pick" data-v="${v}">${d}</button>`);
+    }
+    $('#dlg').innerHTML = `<div class="dlg cal">
+      <h2>📅 마감 날짜</h2>
+      <div class="cal-quick">
+        <button type="button" class="chip" data-act="cal-pick" data-v="${t}">오늘</button>
+        <button type="button" class="chip" data-act="cal-pick" data-v="${addDays(t, 1)}">내일</button>
+        <button type="button" class="chip" data-act="cal-pick" data-v="${addDays(t, 7)}">일주일 뒤</button>
+        <button type="button" class="chip ${cal.cur ? '' : 'on'}" data-act="cal-pick" data-v="">마감 없음</button>
+      </div>
+      <div class="cal-head">
+        <button type="button" class="btn sm ghost" data-act="cal-nav" data-n="-1" aria-label="이전 달">◀</button>
+        <b>${y}년 ${m}월</b>
+        <button type="button" class="btn sm ghost" data-act="cal-nav" data-n="1" aria-label="다음 달">▶</button>
+      </div>
+      <div class="cal-grid">${DAYS.map((d, i) => `<span class="cal-dow ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${d}</span>`).join('')}${cells.join('')}</div>
+      <div class="row end" style="margin-top:12px"><button type="button" class="btn ghost" data-close>닫기</button></div>
+    </div>`;
+  }
+
   function dueTag(x) {
     const t = today();
     const n = daysBetween(t, x.due);
@@ -706,8 +755,8 @@
     const pk = x.peakId && findPeak(x.peakId);
     return `<div class="task ${x.done ? 'done' : ''}">
       <input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료">
-      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<label class="due-pick" aria-label="마감 날짜 바꾸기">${dueTag(x)}<input type="date" data-task-due="${x.id}" value="${esc(x.due)}"></label>`}</span>` : ''}</span>
-      ${!x.due && !x.done ? `<label class="due-pick" aria-label="마감 날짜 넣기"><span class="due-add">📅</span><input type="date" data-task-due="${x.id}" value=""></label>` : ''}
+      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 바꾸기">${dueTag(x)}</button>`}</span>` : ''}</span>
+      ${!x.due && !x.done ? `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 넣기"><span class="due-add">📅</span></button>` : ''}
       <button class="icon-btn" data-act="del-task" data-id="${x.id}" aria-label="삭제">✕</button>
     </div>`;
   }
@@ -1248,6 +1297,9 @@
         toast(`목표를 ${ym(pk.due)}로 다시 잡았어요`);
         break;
       }
+      case 'open-cal': openCal(id); return;
+      case 'cal-nav': cal.month = addMonths(cal.month, Number(el.dataset.n)); drawCal(); return;
+      case 'cal-pick': { const target = cal.target; closeDlg(); cal = null; setDue(target, el.dataset.v); return; }
       case 'pick-due': {
         newDue = el.dataset.v;
         const keep = $('#task-input')?.value || '';
@@ -1441,20 +1493,9 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.act === 'pick-goal') { newGoal = el.value; return; }
-    if (el.dataset.act === 'pick-due-date') {
-      newDue = el.value || '';
-      const keep = $('#task-input')?.value || '';
-      render(); const inp = $('#task-input'); if (inp) inp.value = keep;
-      return;
-    }
-    if (el.dataset.taskDue) {
-      const x = state.tasks.find((t) => t.id === el.dataset.taskDue);
-      if (x) { x.due = el.value || ''; save(); render(); toast(x.due ? `📅 마감 ${shortDate(x.due)}` : '마감을 뺐어요'); }
-      return;
-    }
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
-      if (pk) { pk.due = el.value; save(); render(); }
+      if (pk) { pk.due = el.value; save(); renderAfterPicker(el); }
       return;
     }
     if (el.dataset.work && el.dataset.field === 'batch') {
@@ -1477,9 +1518,14 @@
     if (el.dataset.bind && el.hasAttribute('data-rerender')) {
       setPath(el.dataset.bind, el.value);
       save();
-      render();
+      renderAfterPicker(el);
     }
   });
+  // 날짜·달 선택기가 열려 있는 동안 화면을 다시 그리면 아이폰에서 선택기가 저절로 닫힘 → 선택을 마친 뒤(칸을 떠날 때) 다시 그림
+  function renderAfterPicker(el) {
+    if (document.activeElement !== el) { render(); return; }
+    el.addEventListener('blur', () => setTimeout(render, 0), { once: true });
+  }
 
   // 휴대폰 키보드가 실제로 떠 있는 동안에만 아래 메뉴를 숨김.
   // (예전엔 입력칸에 커서만 남아 있어도 숨겨서, 키보드를 내린 뒤에도 메뉴가 사라진 채로 남았음)
