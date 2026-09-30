@@ -491,3 +491,7 @@ body.typing .tabs { display: none; }
 .sun { color: var(--accent); }
 .sat { color: var(--blue); }
 .cal-day.sel.sun, .cal-day.sel.sat { color: var(--bg); }
+
+/* 🚶 지금 오르는 산 켜고 끄기 */
+.climb-btn { border: 1.5px dashed var(--line); background: var(--card); color: var(--muted); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer; min-height: 30px; }
+.climb-btn.on { border: 1.5px solid var(--accent); background: var(--accent); color: #fff; }
