@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.01.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.01.4'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -449,7 +449,7 @@
     ];
     const showOnboard = !state.onboardDismissed && steps.some((s) => !s.ok);
 
-    const visible = state.tasks.filter((x) => !x.done || x.doneDate === t);
+    const visible = state.tasks.filter((x) => !x.done); // 끝낸 일은 주간 리뷰 '끝낸 일'로
 
     const lane = (c) => {
       const items = visible.filter((x) => catOf(x.cat).id === c.id)
@@ -530,23 +530,29 @@
   }
   const dayScore = (date) => { const l = rulesOf(parseYmd(date).getDay()); return { done: l.filter((r) => ruleDone(r, date)).length, total: l.length }; };
 
+  let ruleDay = null; // 규칙 카드에서 보고 있는 날 (null = 오늘)
   function rulesCard() {
-    const t = today();
+    const today_ = today();
+    if (ruleDay && (ruleDay > today_ || ruleDay < weekStart())) ruleDay = null;
+    const t = ruleDay || today_;
+    const isToday = t === today_;
     const dow = parseYmd(t).getDay();
     const list = rulesOf(dow);
     const sc = dayScore(t);
     const weekday = dow >= 1 && dow <= 5;
     const ws = weekStart();
-    return `<section class="card rules">
-      <div class="card-head"><h2>📅 오늘의 규칙 · ${DAYS[dow]}요일</h2>${list.length ? `<span class="muted">${sc.done}/${sc.total}</span>` : ''}</div>
-      ${weekday ? '<p class="rule-base">🏢 회사 · 🚇 이동시간은 검수 또는 input</p>' : ''}
+    return `<section class="card rules ${isToday ? '' : 'past-day'}">
+      <div class="card-head"><h2>📅 ${isToday ? `오늘의 규칙 · ${DAYS[dow]}요일` : `${shortDate(t)} 규칙`}</h2>${list.length ? `<span class="muted">${sc.done}/${sc.total}</span>` : ''}</div>
+      ${isToday ? '' : `<div class="past-note">지난 날 기록을 보고 있어요. 체크를 고칠 수도 있어요. <button class="btn sm" data-act="rule-day" data-d="">오늘로 ↩︎</button></div>`}
+      ${weekday && isToday ? '<p class="rule-base">🏢 회사 · 🚇 이동시간은 검수 또는 input</p>' : ''}
       ${list.map((r) => { const d = ruleDone(r, t); const auto = d && !(state.ruleLog[t] || []).includes(r.id); return `<div class="task ${d ? 'done' : ''}">
-        <input type="checkbox" data-act="rule-tick" data-id="${r.id}" ${d ? 'checked' : ''} ${auto ? 'disabled' : ''} aria-label="지켰어요">
+        <input type="checkbox" data-act="rule-tick" data-id="${r.id}" data-d="${t}" ${d ? 'checked' : ''} ${auto ? 'disabled' : ''} aria-label="지켰어요">
         <span class="t">${esc(r.text)}${auto ? '<span class="tag">연재 보드에서 자동</span>' : ''}</span>
       </div>`; }).join('')}
-      ${!list.length ? '<p class="muted small">오늘은 정해 둔 규칙이 없어요.</p>' : ''}
-      ${dow === 0 ? `<p class="hint">${sc.total && sc.done === sc.total ? '🛋️ 다 했어요! 남은 반나절은 푹 쉬어요.' : '반나절 안에 끝내고, 나머지 반나절은 쉬어요.'}</p>` : ''}
-      <div class="rule-week">${weekDays(ws).map((d) => { const k = dayScore(d); const full = k.total && k.done === k.total; return `<span class="${d === t ? 'today' : ''} ${full ? 'full' : k.done ? 'part' : ''} ${d > t ? 'future' : ''}"><b>${DAYS[parseYmd(d).getDay()]}</b><i>${d > t ? '' : full ? '✓' : k.total ? `${k.done}/${k.total}` : '-'}</i></span>`; }).join('')}</div>
+      ${!list.length ? `<p class="muted small">${isToday ? '오늘은' : '이날은'} 정해 둔 규칙이 없어요.</p>` : ''}
+      ${dow === 0 && isToday ? `<p class="hint">${sc.total && sc.done === sc.total ? '🛋️ 다 했어요! 남은 반나절은 푹 쉬어요.' : '반나절 안에 끝내고, 나머지 반나절은 쉬어요.'}</p>` : ''}
+      <div class="rule-week">${weekDays(ws).map((d) => { const k = dayScore(d); const full = k.total && k.done === k.total; return `<button type="button" class="${d === today_ ? 'today' : ''} ${d === t ? 'sel' : ''} ${full ? 'full' : k.done ? 'part' : ''} ${d > today_ ? 'future' : ''}" data-act="rule-day" data-d="${d}" ${d > today_ ? 'disabled' : ''} aria-label="${shortDate(d)} 규칙 보기"><b>${DAYS[parseYmd(d).getDay()]}</b><i>${d > today_ ? '' : full ? '✓' : k.total ? `${k.done}/${k.total}` : '-'}</i></button>`; }).join('')}</div>
+      <p class="hint" style="margin-top:6px">요일을 누르면 그날 지켰는지 볼 수 있어요.</p>
       <button class="btn sm ghost" style="margin-top:8px" data-act="go-rules">✎ 요일별 규칙 고치기</button>
     </section>`;
   }
@@ -611,7 +617,7 @@
     const S = state.structure;
     if (!structEditing) {
       return `<section class="card structure">
-        <div class="card-head"><h2>🗺️ 올해의 큰 구조</h2><button class="btn sm ghost" data-act="struct-edit">✎ 고치기</button></div>
+        <div class="card-head"><h2>🗺️ 올해의 큰 구조</h2><button class="btn sm ghost" data-act="struct-edit">✎ 고치기 · 순서</button></div>
         ${S.title ? `<p class="st-title">${esc(S.title)}</p>` : ''}
         <div class="st-areas">${S.areas.map((a) => `<div class="st-area"><div class="row between"><b>${esc(a.name)}</b><span class="st-cad">${esc(a.cadence)}</span></div>${a.role ? `<span class="muted small">${esc(a.role)}</span>` : ''}</div>`).join('')}</div>
         ${S.dropped.length ? `<details class="st-drop"><summary class="muted small">일정에서 뺀 것 ${S.dropped.length}개</summary>
@@ -764,7 +770,7 @@
     const urgent = !x.done && x.due ? (x.due === t ? 'due-today' : x.due < t ? 'due-over' : '') : '';
     return `<div class="task ${x.done ? 'done' : ''} ${urgent}">
       <input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료">
-      <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 바꾸기">${dueTag(x)}</button>`}</span>` : ''}</span>
+      <span class="t"><textarea class="task-text grow-text" rows="1" data-task-text="${x.id}" aria-label="할 일 내용">${esc(x.text)}</textarea>${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 바꾸기">${dueTag(x)}</button>`}</span>` : ''}</span>
       ${!x.due && !x.done ? `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 넣기"><span class="due-add">📅</span></button>` : ''}
       <button class="icon-btn" data-act="del-task" data-id="${x.id}" aria-label="삭제">✕</button>
     </div>`;
@@ -887,10 +893,11 @@
 
       <section class="card">
         <div class="card-head"><h2>🎯 1년 목표</h2><span class="muted">숫자로, 3~5개</span></div>
-        ${v.goals.length ? v.goals.map((g) => `<div class="goal ${g.done ? 'done' : ''}">
+        ${v.goals.length ? v.goals.map((g, i) => `<div class="goal ${g.done ? 'done' : ''}">
           <input type="checkbox" data-act="toggle-goal" data-id="${g.id}" ${g.done ? 'checked' : ''} aria-label="달성">
           <span class="t">${esc(g.text)}</span>
           <span class="meta">${doneCount(g.id) ? `연결된 일 ${doneCount(g.id)}개 완료` : ''}</span>
+          <span class="mv-pair"><button class="mv" data-act="goal-move" data-id="${g.id}" data-n="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로">▲</button><button class="mv" data-act="goal-move" data-id="${g.id}" data-n="1" ${i === v.goals.length - 1 ? 'disabled' : ''} aria-label="아래로">▼</button></span>
           <button class="icon-btn" data-act="del-goal" data-id="${g.id}" aria-label="삭제">✕</button>
         </div>`).join('') : '<p class="muted small">예: 빚 0원 만들기 · 월수입 300만원 · 워크숍 3회 열기 · 전자책 1권 출간</p>'}
         <form class="add-task" data-form="goal" style="margin-top:10px">
@@ -922,6 +929,15 @@
 
   /* ---------- 주간 리뷰 ---------- */
   let reviewWeek = null;
+  let doneOpen = false; // '끝낸 일 전체' 자세히 펼침
+  function doneList(ws) {
+    const we = addDays(ws, 6);
+    const done = state.tasks.filter((x) => x.done && x.doneDate && x.doneDate >= ws && x.doneDate <= we).sort((a, b) => b.doneDate.localeCompare(a.doneDate));
+    const days = [...new Set(done.map((x) => x.doneDate))];
+    return `<div class="done-list">${days.map((d) => `<div class="done-day"><b>${shortDate(d)}</b>
+      ${done.filter((x) => x.doneDate === d).map((x) => `<div class="done-item"><span>✓ ${esc(x.text)} <span class="muted small">${esc(catOf(x.cat).icon)}</span></span><button class="btn sm ghost" data-act="undo-done" data-id="${x.id}">↩︎ 되돌리기</button></div>`).join('')}
+    </div>`).join('')}</div>`;
+  }
 
   function renderReview() {
     const cur = weekStart();
@@ -936,7 +952,7 @@
       <section class="card">
         <div class="card-head">
           <h2>📊 ${shortDate(ws)} ~ ${shortDate(addDays(ws, 6))}</h2>
-          <span class="row">
+          <span class="row" style="flex-wrap:nowrap;flex:none">
             <button class="btn sm ghost" data-act="week-shift" data-n="-7" aria-label="이전 주">←</button>
             <button class="btn sm ghost" data-act="week-shift" data-n="7" aria-label="다음 주" ${ws >= cur ? 'disabled' : ''}>→</button>
           </span>
@@ -946,12 +962,13 @@
           <div class="stat"><b>${man(st.paid)}</b><span>✅ 갚은 빚</span></div>
           <div class="stat"><b>${st.rules}</b><span>📅 지킨 규칙</span></div>
           <div class="stat"><b>${st.checked}화 · ${st.reserved}화</b><span>📚 검수 · 예약</span></div>
-          <div class="stat"><b>${st.done}개</b><span>✅ 끝낸 일 전체</span></div>
+          <button type="button" class="stat stat-btn ${doneOpen ? 'open' : ''}" data-act="done-open" ${st.done ? '' : 'disabled'}><b>${st.done}개</b><span>✅ 끝낸 일 전체${st.done ? ` · ${doneOpen ? '접기 ▴' : '자세히 ▾'}` : ''}</span></button>
           <div class="stat"><b>${st.done ? Math.round((st.linked / st.done) * 100) : 0}%</b><span>🎯 목표와 연결된 일</span></div>
           <div class="stat"><b>${st.peaks}개</b><span>⛰️ 넘은 작은 산</span></div>
           <div class="stat"><b>${st.steps ?? 0}개</b><span>🪜 이룬 작은 목표</span></div>
           <div class="stat"><b>${st.routine ?? '-'}</b><span>🔁 채운 루틴</span></div>
         </div>
+        ${doneOpen && st.done ? doneList(ws) : ''}
       </section>
 
       ${latePeaks().length ? `<section class="card late-card">
@@ -1220,7 +1237,7 @@
         if (!x) return;
         x.done = !x.done;
         x.doneDate = x.done ? today() : null;
-        if (x.done) toast('✅ 끝!');
+        if (x.done) toast('✅ 끝! 주간 리뷰의 끝낸 일로 옮겼어요');
         // 작은 목표에 연결된 일을 끝내면 그 작은 목표도 체크
         const pk = x.peakId && findPeak(x.peakId), st = findStep(pk, x.stepId);
         if (x.done && st && !st.done) { st.done = true; st.doneDate = today(); if (!pk.done) toast(`🪜 작은 목표 "${st.text}" 이뤘어요`); syncPeakDone(pk); }
@@ -1366,15 +1383,16 @@
         break;
       }
       case 'struct-reset': if (!confirm('올해의 큰 구조를 처음 내용으로 되돌릴까요? 고친 내용은 사라져요.')) return; state.structure = DEFAULT_STRUCTURE(); break;
+      case 'rule-day': ruleDay = el.dataset.d || null; render(); $('.rules')?.scrollIntoView({ block: 'nearest' }); return;
       case 'rule-tick': {
-        const t = today();
+        const t = el.dataset.d || today();
         const log = state.ruleLog[t] || [];
         state.ruleLog[t] = log.includes(id) ? log.filter((x) => x !== id) : [...log, id];
         // 오래된 기록은 반년 치만 보관
         const cut = addDays(t, -183);
         Object.keys(state.ruleLog).forEach((d) => { if (d < cut) delete state.ruleLog[d]; });
         const sc = dayScore(t);
-        if (!log.includes(id) && sc.total && sc.done === sc.total) toast(new Date().getDay() === 0 ? '🛋️ 오늘 규칙 끝! 이제 쉬어요' : '📅 오늘 규칙 다 지켰어요!');
+        if (t === today() && !log.includes(id) && sc.total && sc.done === sc.total) toast(new Date().getDay() === 0 ? '🛋️ 오늘 규칙 끝! 이제 쉬어요' : '📅 오늘 규칙 다 지켰어요!');
         break;
       }
       case 'go-rules': go('settings'); $('#rules-set')?.scrollIntoView({ block: 'start' }); return;
@@ -1486,6 +1504,15 @@
       case 'del-pay': if (!confirm('이 상환 기록을 지울까요?')) return; state.debt.payments = state.debt.payments.filter((p) => p.id !== id); break;
       case 'del-fixed': state.fixed = state.fixed.filter((f) => f.id !== id); break;
       case 'preset': { const n = $('#fixed-name'); n.value = el.dataset.name; n.nextElementSibling.focus(); return; }
+      case 'done-open': doneOpen = !doneOpen; render(); return;
+      case 'undo-done': {
+        const x = state.tasks.find((y) => y.id === id);
+        if (!x) return;
+        x.done = false; x.doneDate = null;
+        toast('↩︎ 오늘 할 일로 되돌렸어요');
+        break;
+      }
+      case 'goal-move': if (!moveIn(state.vision.goals, id, Number(el.dataset.n))) return; break;
       case 'toggle-goal': {
         const g = state.vision.goals.find((x) => x.id === id);
         if (g) { g.done = !g.done; if (g.done) toast('🎯 1년 목표 달성! 대단해요'); }
@@ -1602,6 +1629,11 @@
     if (el.dataset.step) {
       const st = findStep(findPeak(el.dataset.peak), el.dataset.step);
       if (st) { st.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
+      return;
+    }
+    if (el.dataset.taskText) {
+      const x = state.tasks.find((y) => y.id === el.dataset.taskText);
+      if (x) { x.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
       return;
     }
     if (el.dataset.struct) {
