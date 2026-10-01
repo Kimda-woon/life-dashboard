@@ -13,6 +13,8 @@
   --blue-soft: #e3eafb;
   --gold: #b7891c;
   --gold-soft: #f7edd2;
+  --due: #d33a52;         /* 오늘까지 해야 할 일 */
+  --due-soft: #fde4e8;
   --radius: 16px;
   --chart-a: #e0662f;   /* 그래프: 체감 오름 (색약 검사 통과 조합) */
   --chart-b: #3563c9;   /* 그래프: 1년 진행률 */
@@ -35,6 +37,8 @@
     --blue-soft: #232c42;
     --gold: #e0b852;
     --gold-soft: #3a3220;
+    --due: #ff7088;
+    --due-soft: #3f2028;
     --shadow: none;
     --chart-a: #e0662f;
     --chart-b: #5b82e0;
@@ -472,7 +476,12 @@ body.typing .tabs { display: none; }
 .due-add { font-size: 15px; opacity: .45; padding: 4px 6px; }
 .due-tag { font-size: 12px; font-weight: 700; white-space: nowrap; padding: 3px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); }
 .due-tag.soon { background: var(--accent-soft); color: var(--accent); }
-.due-tag.over { background: var(--accent); color: #fff; }
+.due-tag.today, .due-tag.over { background: var(--due); color: #fff; }
+/* 오늘까지 · 지난 일은 줄 전체를 빨간 톤으로 */
+.task.due-today, .task.due-over { background: var(--due-soft); box-shadow: inset 4px 0 0 var(--due); }
+.task.due-today .t, .task.due-over .t { font-weight: 700; }
+.due-count { color: var(--due); font-weight: 800; font-size: 14px; margin: -2px 0 10px; }
+@media (prefers-color-scheme: dark) { .due-tag.today, .due-tag.over { color: #1a0d10; } }
 .due-line { display: block; margin-top: 4px; }
 .due-line .due-pick { display: inline-flex; }
 
