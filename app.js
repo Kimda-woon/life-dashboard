@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.01.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.01.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -490,6 +490,7 @@
 
       <section class="card">
         <div class="card-head"><h2>✅ 오늘 할 일</h2><button class="btn sm ghost" data-act="go-cats">종류 바꾸기</button></div>
+        ${(() => { const n = state.tasks.filter((x) => !x.done && x.due && x.due <= t).length; return n ? `<p class="due-count">🔴 오늘까지 해야 할 일 ${n}개</p>` : ''; })()}
         ${pendingPeak && findPeak(pendingPeak) ? `<div class="peak-link">⛰️ <b>${esc(findPeak(pendingPeak).text)}</b>${pendingStep && findStep(findPeak(pendingPeak), pendingStep) ? ` › ${esc(findStep(findPeak(pendingPeak), pendingStep).text)}` : ''}을(를) 위한 일로 넣어요. 끝내면 작은 목표도 함께 체크돼요. 종류를 고르고 <b>추가</b>를 누르세요. <button class="btn sm ghost" data-act="peak-unlink">연결 빼기</button></div>` : ''}
         <form class="add-task" data-form="task">
           <input name="task" placeholder="예: 치과 예약 10/7까지" autocomplete="off" id="task-input">
@@ -749,16 +750,19 @@
   function dueTag(x) {
     const t = today();
     const n = daysBetween(t, x.due);
-    const cls = x.done ? '' : n < 0 ? 'over' : n <= 1 ? 'soon' : '';
-    const left = x.done ? '' : n < 0 ? ` · ${-n}일 지남` : n === 0 ? ' · 오늘까지' : n === 1 ? ' · 내일까지' : ` · D-${n}`;
-    return `<span class="due-tag ${cls}">📅 ${shortDate(x.due)}${left}</span>`;
+    const cls = x.done ? '' : n < 0 ? 'over' : n === 0 ? 'today' : n === 1 ? 'soon' : '';
+    const left = x.done ? '' : n < 0 ? ` · ${-n}일 지남` : n === 0 ? ' · 오늘까지!' : n === 1 ? ' · 내일까지' : n <= 99 ? ` · D-${n}` : '';
+    // 다른 해의 날짜는 연도까지 보여 줌 (예: 2027.1.1(금))
+    const label = x.due.slice(0, 4) === t.slice(0, 4) ? shortDate(x.due) : `${x.due.slice(0, 4)}.${shortDate(x.due)}`;
+    return `<span class="due-tag ${cls}">📅 ${label}${left}</span>`;
   }
 
   function taskRow(x) {
     const t = today();
     const g = x.goalId && goalName(x.goalId);
     const pk = x.peakId && findPeak(x.peakId);
-    return `<div class="task ${x.done ? 'done' : ''}">
+    const urgent = !x.done && x.due ? (x.due === t ? 'due-today' : x.due < t ? 'due-over' : '') : '';
+    return `<div class="task ${x.done ? 'done' : ''} ${urgent}">
       <input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료">
       <span class="t">${esc(x.text)}${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 바꾸기">${dueTag(x)}</button>`}</span>` : ''}</span>
       ${!x.due && !x.done ? `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 넣기"><span class="due-add">📅</span></button>` : ''}
