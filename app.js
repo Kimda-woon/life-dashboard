@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.01.4'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.01.5'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -929,14 +929,41 @@
 
   /* ---------- 주간 리뷰 ---------- */
   let reviewWeek = null;
-  let doneOpen = false; // '끝낸 일 전체' 자세히 펼침
+  let statOpen = null; // 주간 리뷰에서 펼친 칸 ('done' | 'linked' | 'peaks' | 'steps' | 'routine')
+  // 누르면 아래에 내용이 펼쳐지는 숫자 칸 (내용이 없으면 누를 수 없음)
+  const statBtn = (key, big, label, n) => `<button type="button" class="stat stat-btn ${statOpen === key ? 'open' : ''}" data-act="stat-open" data-k="${key}" ${n ? '' : 'disabled'} aria-expanded="${statOpen === key}"><b>${big}</b><span>${label}</span></button>`;
+  function statDetail(key, ws) {
+    const we = addDays(ws, 6);
+    const inWeek = (d) => d && d >= ws && d <= we;
+    const empty = '<p class="muted small" style="padding:10px 0">이번 주에는 없어요.</p>';
+    const wrap = (title, body) => `<div class="done-list"><p class="detail-title">${title}</p>${body || empty}</div>`;
+    const tagsOf = (x) => { const g = x.goalId && goalName(x.goalId); const pk = x.peakId && findPeak(x.peakId); return `${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}</span>` : ''}`; };
+    if (key === 'done') return wrap('✅ 끝낸 일', doneList(ws));
+    if (key === 'linked') {
+      const list = state.tasks.filter((x) => x.done && inWeek(x.doneDate) && (x.goalId || x.peakId)).sort((a, b) => b.doneDate.localeCompare(a.doneDate));
+      return wrap('🎯 목표와 연결된 일', list.map((x) => `<div class="done-item"><span>✓ ${esc(x.text)} ${tagsOf(x)}</span><span class="muted small">${shortDate(x.doneDate)}</span></div>`).join(''));
+    }
+    if (key === 'peaks') {
+      const list = allPeaks().filter((pk) => pk.done && inWeek(pk.doneDate));
+      return wrap('⛰️ 넘은 작은 산', list.map((pk) => `<div class="done-item"><span>🚩 ${esc(pk.text)} <span class="tag">${pk.hLabel}</span></span><span class="muted small">${shortDate(pk.doneDate)}</span></div>`).join(''));
+    }
+    if (key === 'steps') {
+      const list = allPeaks().flatMap((pk) => (pk.steps || []).filter((x) => x.done && inWeek(x.doneDate)).map((x) => ({ x, pk })));
+      return wrap('🪜 이룬 작은 목표', list.map(({ x, pk }) => `<div class="done-item"><span>✓ ${esc(x.text)} <span class="tag">⛰️ ${esc(pk.text)}</span></span><span class="muted small">${shortDate(x.doneDate)}</span></div>`).join(''));
+    }
+    if (key === 'routine') {
+      const days = weekDays(ws);
+      return wrap('🔁 루틴', state.routines.map((r) => { const c = routineCount(r, ws); const ok = c >= r.perWeek; return `<div class="done-item"><span>${ok ? '✓' : '·'} ${esc(r.text)} <span class="muted small">${c}/${r.perWeek}회</span></span><span class="rt-mini">${days.map((d) => `<i class="${(r.days || []).includes(d) ? 'on' : ''}" title="${shortDate(d)}">${DAYS[parseYmd(d).getDay()]}</i>`).join('')}</span></div>`; }).join(''));
+    }
+    return '';
+  }
   function doneList(ws) {
     const we = addDays(ws, 6);
     const done = state.tasks.filter((x) => x.done && x.doneDate && x.doneDate >= ws && x.doneDate <= we).sort((a, b) => b.doneDate.localeCompare(a.doneDate));
     const days = [...new Set(done.map((x) => x.doneDate))];
-    return `<div class="done-list">${days.map((d) => `<div class="done-day"><b>${shortDate(d)}</b>
+    return `${days.map((d) => `<div class="done-day"><b>${shortDate(d)}</b>
       ${done.filter((x) => x.doneDate === d).map((x) => `<div class="done-item"><span>✓ ${esc(x.text)} <span class="muted small">${esc(catOf(x.cat).icon)}</span></span><button class="btn sm ghost" data-act="undo-done" data-id="${x.id}">↩︎ 되돌리기</button></div>`).join('')}
-    </div>`).join('')}</div>`;
+    </div>`).join('')}`;
   }
 
   function renderReview() {
@@ -962,13 +989,13 @@
           <div class="stat"><b>${man(st.paid)}</b><span>✅ 갚은 빚</span></div>
           <div class="stat"><b>${st.rules}</b><span>📅 지킨 규칙</span></div>
           <div class="stat"><b>${st.checked}화 · ${st.reserved}화</b><span>📚 검수 · 예약</span></div>
-          <button type="button" class="stat stat-btn ${doneOpen ? 'open' : ''}" data-act="done-open" ${st.done ? '' : 'disabled'}><b>${st.done}개</b><span>✅ 끝낸 일 전체${st.done ? ` · ${doneOpen ? '접기 ▴' : '자세히 ▾'}` : ''}</span></button>
-          <div class="stat"><b>${st.done ? Math.round((st.linked / st.done) * 100) : 0}%</b><span>🎯 목표와 연결된 일</span></div>
-          <div class="stat"><b>${st.peaks}개</b><span>⛰️ 넘은 작은 산</span></div>
-          <div class="stat"><b>${st.steps ?? 0}개</b><span>🪜 이룬 작은 목표</span></div>
-          <div class="stat"><b>${st.routine ?? '-'}</b><span>🔁 채운 루틴</span></div>
+          ${statBtn('done', `${st.done}개`, '✅ 끝낸 일 전체', st.done)}
+          ${statBtn('linked', `${st.done ? Math.round((st.linked / st.done) * 100) : 0}%`, '🎯 목표와 연결된 일', st.linked)}
+          ${statBtn('peaks', `${st.peaks}개`, '⛰️ 넘은 작은 산', st.peaks)}
+          ${statBtn('steps', `${st.steps ?? 0}개`, '🪜 이룬 작은 목표', st.steps)}
+          ${statBtn('routine', st.routine ?? '-', '🔁 채운 루틴', state.routines.length)}
         </div>
-        ${doneOpen && st.done ? doneList(ws) : ''}
+        ${statOpen ? statDetail(statOpen, ws) : ''}
       </section>
 
       ${latePeaks().length ? `<section class="card late-card">
@@ -1504,7 +1531,7 @@
       case 'del-pay': if (!confirm('이 상환 기록을 지울까요?')) return; state.debt.payments = state.debt.payments.filter((p) => p.id !== id); break;
       case 'del-fixed': state.fixed = state.fixed.filter((f) => f.id !== id); break;
       case 'preset': { const n = $('#fixed-name'); n.value = el.dataset.name; n.nextElementSibling.focus(); return; }
-      case 'done-open': doneOpen = !doneOpen; render(); return;
+      case 'stat-open': statOpen = statOpen === el.dataset.k ? null : el.dataset.k; render(); return;
       case 'undo-done': {
         const x = state.tasks.find((y) => y.id === id);
         if (!x) return;
@@ -1519,7 +1546,7 @@
         break;
       }
       case 'del-goal': if (!confirm('이 목표를 지울까요?')) return; state.vision.goals = state.vision.goals.filter((g) => g.id !== id); break;
-      case 'week-shift': reviewWeek = addDays(reviewWeek, num(el.dataset.n)); render(); return;
+      case 'week-shift': statOpen = null; reviewWeek = addDays(reviewWeek, num(el.dataset.n)); render(); return;
       case 'export': return exportData();
       case 'reset':
         if (!confirm('정말 모든 기록을 지울까요? 되돌릴 수 없어요.')) return;
