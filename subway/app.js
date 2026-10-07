@@ -30,7 +30,8 @@
   }
   function isChoseongOnly(s) { return s.length > 0 && s.split('').every(function (c) { return CHO.indexOf(c) >= 0; }); }
   function search(q) {
-    q = q.trim().replace(/역$/, '');
+    q = q.trim();
+    if (!router.hasStation(q)) q = q.replace(/역$/, '');
     if (!q) return [];
     var cho = isChoseongOnly(q);
     var hits = names.filter(function (n) { return cho ? choseong(n).indexOf(q) >= 0 : n.indexOf(q) >= 0; });
@@ -54,7 +55,7 @@
   function badge(line, label) {
     return '<span class="badge" style="background:' + line.color + ';color:' + line.text + '">' + (label || line.name) + '</span>';
   }
-  function yeok(n) { return n + '역'; }
+  function yeok(n) { return /역$/.test(n) ? n : n + '역'; }  // '서울역'은 '서울역역'이 되지 않게
 
   function renderSuggest(which) {
     var ul = lists[which], q = inputs[which].value;

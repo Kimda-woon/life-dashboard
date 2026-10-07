@@ -4,7 +4,7 @@
 //  2) 순서 비교: 우리 데이터의 이웃 역 쌍이 CSV 역 코드 순서에도 이웃인지
 const fs = require('fs');
 const lines = require('./data.js');
-const MAP = { 1: 'L1', 2: 'L2', 3: 'L3', 4: 'L4', 5: 'L5', 6: 'L6', 7: 'L7', 8: 'L8', 9: 'L9', 11: 'GYEONGUI', 12: 'SUINBUNDANG', 13: 'SINBUNDANG' };
+const MAP = { 1: 'L1', 2: 'L2', 3: 'L3', 4: 'L4', 5: 'L5', 6: 'L6', 7: 'L7', 8: 'L8', 9: 'L9', 11: 'GYEONGUI', 12: 'SUINBUNDANG', 13: 'SINBUNDANG', 14: 'AREX', 15: 'GTXA', 16: 'GYEONGCHUN' };
 
 function parseCsv(text) {
   const [head, ...rows] = text.trim().split(/\r?\n/);
@@ -30,13 +30,21 @@ lines.forEach(line => {
 console.log('\n이름 차이 합계:', problems);
 
 // ---- 순서 비교 ----
-function codeKey(c) { const m = /^([A-Z]*)(\d+)(?:-(\d+))?$/.exec(c) || []; return [m[1] || '', +m[2] || 0, +m[3] || 0]; }
+// 역 코드 = 접두 영문 + 숫자열(+ '-숫자'). 'A042'는 'A04'와 'A05' 사이(0으로 시작하면 문자열 비교),
+// 'D4' < 'D19'(0 없으면 숫자 비교).
+function codeParts(c) { const m = /^([A-Z]*)([\d]+)(?:-(\d+))?$/.exec(c) || ['', '', '0', '0']; return { p: m[1], d: m[2], s: +(m[3] || 0) }; }
+function codeCmp(a, b) {
+  const x = codeParts(a), y = codeParts(b);
+  if (x.p !== y.p) return x.p < y.p ? -1 : 1;
+  if (x.d !== y.d) {
+    if (x.d[0] === '0' || y.d[0] === '0') return x.d < y.d ? -1 : 1;
+    return +x.d - +y.d;
+  }
+  return x.s - y.s;
+}
 let orderProblems = 0;
 lines.forEach(line => {
-  const csv = rows.filter(r => r.line === MAP[line.id]).sort((a, b) => {
-    const x = codeKey(a.fr_code), y = codeKey(b.fr_code);
-    return x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : x[1] - y[1] || x[2] - y[2];
-  });
+  const csv = rows.filter(r => r.line === MAP[line.id]).sort((a, b) => codeCmp(a.fr_code, b.fr_code));
   const theirsPairs = new Set();
   for (let i = 0; i < csv.length - 1; i++) {
     const a = norm(csv[i].name_ko), b = norm(csv[i + 1].name_ko);

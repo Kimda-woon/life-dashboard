@@ -23,8 +23,8 @@
           var arr = stationLines[s] = stationLines[s] || [];
           if (arr.indexOf(line.id) < 0) arr.push(line.id);
         });
-        for (var i = 0; i < st.length - 1; i++) link(key(line.id, st[i]), key(line.id, st[i + 1]), STOP_MIN);
-        if (path.ring) link(key(line.id, st[st.length - 1]), key(line.id, st[0]), STOP_MIN);
+        for (var i = 0; i < st.length - 1; i++) link(key(line.id, st[i]), key(line.id, st[i + 1]), line.stopMin || STOP_MIN);
+        if (path.ring) link(key(line.id, st[st.length - 1]), key(line.id, st[0]), line.stopMin || STOP_MIN);
       });
     });
     Object.keys(stationLines).forEach(function (s) {
@@ -116,8 +116,8 @@
         ride.beforeLast = s.length >= 3 ? s[s.length - 2] : null;
         ride.labels = directionLabels(ride.line, s);
       });
-      var stops = rides.reduce(function (n, x) { return n + x.stops; }, 0);
-      return { from: from, to: to, rides: rides, transfers: rides.length - 1, minutes: stops * STOP_MIN + (rides.length - 1) * TRANSFER_MIN };
+      var ride_min = rides.reduce(function (n, x) { return n + x.stops * (x.line.stopMin || STOP_MIN); }, 0);
+      return { from: from, to: to, rides: rides, transfers: rides.length - 1, minutes: ride_min + (rides.length - 1) * TRANSFER_MIN };
     }
 
     return {

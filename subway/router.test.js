@@ -34,6 +34,11 @@ route = r.findRoute('서울역', '인천'); assert.strictEqual(route.transfers, 
 route = r.findRoute('강남', '판교'); assert.strictEqual(route.rides[0].line.id, 13); assert.strictEqual(route.rides[0].next, '양재');
 route = r.findRoute('서울숲', '선릉'); assert.strictEqual(route.rides[0].line.id, 12);
 route = r.findRoute('용산', '양평(경기)'); assert.ok(route.rides.some(x => x.line.id === 11 && x.to === '양평(경기)'));
+// 공항철도·GTX-A·경춘선
+route = r.findRoute('서울역', '인천공항1터미널'); assert.strictEqual(route.transfers, 0); assert.strictEqual(route.rides[0].line.id, 14); assert.strictEqual(route.rides[0].next, '공덕');
+route = r.findRoute('서울역', '동탄'); assert.strictEqual(route.rides[0].line.id, 15); assert.deepStrictEqual(route.rides[0].labels, ['동탄 방면']); assert.strictEqual(route.minutes, 4 * 5);
+route = r.findRoute('청량리', '춘천'); assert.strictEqual(route.rides[0].line.id, 16); assert.deepStrictEqual(route.rides[0].labels, ['춘천 방면']);
+route = r.findRoute('강남', '인천공항2터미널'); assert.ok(route.rides[route.rides.length - 1].line.id === 14);
 // 환승이 적은 길을 우선 (시간이 조금 더 걸려도)
 assert.strictEqual(r.findRoute('왕십리', '돌곶이').transfers, 1);
 // 같은 역, 없는 역
