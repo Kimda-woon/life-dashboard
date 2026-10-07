@@ -29,6 +29,13 @@ route = r.findRoute('천호', '올림픽공원'); assert.strictEqual(route.rides
 route = r.findRoute('왕십리', '천호'); assert.deepStrictEqual(route.rides[0].labels, ['하남검단산 방면', '마천 방면']);
 // 성수지선
 route = r.findRoute('성수', '신설동'); assert.deepStrictEqual(route.rides[0].labels, ['신설동 방면']);
+// 새 노선: 1호선·경의중앙·수인분당·신분당
+route = r.findRoute('서울역', '인천'); assert.strictEqual(route.transfers, 0); assert.deepStrictEqual(route.rides[0].labels, ['인천 방면']);
+route = r.findRoute('강남', '판교'); assert.strictEqual(route.rides[0].line.id, 13); assert.strictEqual(route.rides[0].next, '양재');
+route = r.findRoute('서울숲', '선릉'); assert.strictEqual(route.rides[0].line.id, 12);
+route = r.findRoute('용산', '양평(경기)'); assert.ok(route.rides.some(x => x.line.id === 11 && x.to === '양평(경기)'));
+// 환승이 적은 길을 우선 (시간이 조금 더 걸려도)
+assert.strictEqual(r.findRoute('왕십리', '돌곶이').transfers, 1);
 // 같은 역, 없는 역
 assert.strictEqual(r.findRoute('강남', '강남'), null);
 assert.strictEqual(r.findRoute('강남', '없는역'), null);

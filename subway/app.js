@@ -117,11 +117,10 @@
   }
 
   // ---------- 길 찾기 ----------
-  var speakText = '';
-
   function dirText(ride) {
     var s = '<em>' + yeok(ride.next) + '</em> 쪽으로 가는 열차';
-    var sign = ride.labels.length ? '<small>표지판·안내방송에는 “' + ride.labels.join('” 또는 “') + '”이라고 나와요</small>' : '';
+    var shown = ride.labels.slice(0, 2).join('” 또는 “') + (ride.labels.length > 2 ? '” 등' : '”');
+    var sign = ride.labels.length ? '<small>표지판에는 보통 “' + shown + '이라고 나와요 (중간에서 돌아가는 열차도 있어요)</small>' : '';
     return '<div class="dir">' + s + sign + '</div>';
   }
 
@@ -164,21 +163,13 @@
     var chain = rides.map(function (r) { return badge(r.line); }).join(' → ');
     var html = '<div class="summary"><h2>' + yeok(a) + ' → ' + yeok(b) + '</h2>' +
       '<div class="chain">' + chain + '</div>' +
-      '<p class="big">' + (route.transfers ? '갈아타는 곳 ' + route.transfers + '번' : '갈아타지 않아도 돼요') + ' · 약 ' + route.minutes + '분</p>' +
-      '<button type="button" id="speak" class="ghost speak">🔊 소리로 듣기</button></div>';
+      '<p class="big">' + (route.transfers ? '갈아타는 곳 ' + route.transfers + '번' : '갈아타지 않아도 돼요') + ' · 약 ' + route.minutes + '분</p></div>';
 
-    var say = [yeok(a) + '에서 ' + yeok(b) + '까지 가는 길이에요.'];
     rides.forEach(function (ride, i) {
-      if (i > 0) {
-        html += transferHtml(rides[i - 1], ride);
-        say.push(yeok(rides[i - 1].to) + '에서 내려서 ' + ride.line.name + '으로 갈아타세요.');
-      }
+      if (i > 0) html += transferHtml(rides[i - 1], ride);
       html += stepHtml(ride, i + 1);
-      say.push(yeok(ride.from) + '에서 ' + ride.line.name + '을 타세요. ' + yeok(ride.next) + ' 쪽으로 가는 열차예요. 탄 뒤 첫 번째 역이 ' + yeok(ride.next) + '이면 맞아요. ' +
-        ride.stops + '정거장 가서 ' + yeok(ride.to) + '에서 내리세요.');
     });
     html += '<div class="arrive">🎉 ' + yeok(b) + '에 도착해요!</div>';
-    speakText = say.join(' ');
 
     var res = $('result');
     res.innerHTML = html;
@@ -187,16 +178,21 @@
   }
   $('go').addEventListener('click', find);
 
-  // ---------- 소리로 듣기 ----------
-  $('result').addEventListener('click', function (e) {
-    if (!e.target.closest('#speak')) return;
-    var synth = window.speechSynthesis;
-    if (!synth) return showMsg('이 기기에서는 소리 안내를 쓸 수 없어요.');
-    if (synth.speaking) { synth.cancel(); return; }
-    var u = new SpeechSynthesisUtterance(speakText);
-    u.lang = 'ko-KR'; u.rate = 0.85;
-    synth.speak(u);
-  });
-
   renderRecent();
+
+  // ---------- 홈 화면 설치 ----------
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(function () {});
+  var installEvt = null, installBox = $('install');
+  var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+  var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (!standalone) {
+    if (ios) { installBox.hidden = false; $('install-btn').hidden = true; $('install-tip').hidden = false; }
+    window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvt = e; installBox.hidden = false; $('install-btn').hidden = false; $('install-tip').hidden = true; });
+  }
+  $('install-btn').addEventListener('click', function () {
+    if (!installEvt) return;
+    installEvt.prompt();
+    installEvt.userChoice.then(function () { installEvt = null; installBox.hidden = true; });
+  });
+  window.addEventListener('appinstalled', function () { installBox.hidden = true; });
 })();

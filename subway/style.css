@@ -76,7 +76,6 @@ button.ghost { background: #fff; border: 3px solid var(--line); font-size: 1.05r
 .summary h2 { margin: 0 0 .4rem; font-size: 1.25rem; }
 .summary .big { font-size: 1.15rem; font-weight: 700; }
 .chain { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .4rem 0; }
-.speak { margin-top: .7rem; background: #fff; color: var(--ink); border: 3px solid var(--ink); }
 
 .step { background: var(--card); border-radius: 1rem; margin-top: 1rem; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 .step-head { display: flex; align-items: center; gap: .6rem; padding: .7rem 1rem; font-weight: 800; font-size: 1.15rem; }
@@ -100,3 +99,6 @@ summary { min-height: 2.8rem; display: flex; align-items: center; font-weight: 7
 .arrive { margin-top: 1rem; background: var(--ok); color: #fff; border-radius: 1rem; padding: 1rem; font-size: 1.25rem; font-weight: 800; text-align: center; }
 
 footer { margin-top: 1.5rem; color: var(--sub); font-size: .85rem; text-align: center; }
+
+.install h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
+.install p { margin: .4rem 0 0; font-size: 1.05rem; }

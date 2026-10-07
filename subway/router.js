@@ -1,7 +1,8 @@
 // 길찾기 엔진: 최소 시간(정거장 2분, 환승 5분) 기준 + 방향 안내 만들기
 (function () {
   var STOP_MIN = 2;
-  var TRANSFER_MIN = 5;
+  var TRANSFER_MIN = 5;      // 화면에 보여 줄 환승 시간
+  var TRANSFER_WEIGHT = 12;  // 길 고를 때 환승 부담: 조금 더 걸려도 갈아타는 횟수가 적은 길을 우선
 
   function createRouter(lines) {
     var byId = {};
@@ -30,7 +31,7 @@
       var ids = stationLines[s];
       for (var i = 0; i < ids.length; i++)
         for (var j = i + 1; j < ids.length; j++)
-          link(key(ids[i], s), key(ids[j], s), TRANSFER_MIN);
+          link(key(ids[i], s), key(ids[j], s), TRANSFER_WEIGHT);
     });
 
     function dijkstra(from, to) {
@@ -115,7 +116,8 @@
         ride.beforeLast = s.length >= 3 ? s[s.length - 2] : null;
         ride.labels = directionLabels(ride.line, s);
       });
-      return { from: from, to: to, rides: rides, transfers: rides.length - 1, minutes: r.cost };
+      var stops = rides.reduce(function (n, x) { return n + x.stops; }, 0);
+      return { from: from, to: to, rides: rides, transfers: rides.length - 1, minutes: stops * STOP_MIN + (rides.length - 1) * TRANSFER_MIN };
     }
 
     return {
