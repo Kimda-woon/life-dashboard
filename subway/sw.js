@@ -1,6 +1,6 @@
 // 오프라인에서도 열리게 앱 파일을 저장해 두는 서비스 워커.
 // 파일을 고쳤다면 VERSION 을 올려야 폰에 새 버전이 반영된다.
-var VERSION = 'subway-v3';
+var VERSION = 'subway-v4';
 var FILES = ['./', 'index.html', 'style.css', 'data.js', 'router.js', 'app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 

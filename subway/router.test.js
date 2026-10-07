@@ -55,6 +55,9 @@ route = r.findRoute('불광', '응암'); assert.strictEqual(route.rides[0].stops
 route = r.findRoute('불광', '공덕'); assert.strictEqual(route.transfers, 1); assert.ok(route.rides[0].labels.length > 0);
 // 환승이 적은 길을 우선 (시간이 조금 더 걸려도)
 assert.strictEqual(r.findRoute('왕십리', '돌곶이').transfers, 1);
+// 공식 노선도(2026-02) 기준: 4호선 진접 연장 구간에 당고개는 없다
+assert.ok(!r.hasStation('당고개'));
+route = r.findRoute('진접', '노원'); assert.deepStrictEqual(route.rides[0].stations, ['진접','오남','별내별가람','불암산','상계','노원']);
 // 같은 역, 없는 역
 assert.strictEqual(r.findRoute('강남', '강남'), null);
 assert.strictEqual(r.findRoute('강남', '없는역'), null);
