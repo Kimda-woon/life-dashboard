@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1b4fd8">
+  <title>쉬운 지하철</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>🚇 쉬운 지하철</h1>
+    <div class="size" role="group" aria-label="글자 크기">
+      <button type="button" data-scale="1" aria-label="보통 글자">가</button>
+      <button type="button" data-scale="1.25" class="m" aria-label="큰 글자">가</button>
+      <button type="button" data-scale="1.5" class="l" aria-label="아주 큰 글자">가</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="finder" class="card">
+      <div class="field">
+        <label for="from">어디서 타세요?</label>
+        <input id="from" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="역 이름 (예: 왕십리)" enterkeyhint="next">
+        <ul id="from-list" class="suggest" hidden></ul>
+      </div>
+
+      <button id="swap" type="button" class="ghost">⇅ 출발·도착 바꾸기</button>
+
+      <div class="field">
+        <label for="to">어디로 가세요?</label>
+        <input id="to" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="역 이름 (예: 돌곶이)" enterkeyhint="go">
+        <ul id="to-list" class="suggest" hidden></ul>
+      </div>
+
+      <p id="msg" class="msg" role="alert" hidden></p>
+      <button id="go" type="button" class="primary">길 알려주세요</button>
+
+      <div id="recent" hidden>
+        <h2>최근에 찾은 길</h2>
+        <div id="recent-list"></div>
+      </div>
+    </section>
+
+    <section id="result" hidden aria-live="polite"></section>
+  </main>
+
+  <footer>
+    서울 지하철 2~9호선 안내예요. 1호선·경의중앙선 등은 준비 중이에요.<br>
+    걸리는 시간은 대략적인 값이에요.
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="router.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
