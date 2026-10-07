@@ -21,8 +21,9 @@ button { cursor: pointer; }
 :focus-visible { outline: 4px solid #f59e0b; outline-offset: 2px; }
 
 .top {
-  position: sticky; top: 0; z-index: 5; background: var(--brand); color: #fff;
-  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  /* 고정하지 않음: 큰 글씨 + 좁은 폰에서 헤더가 화면을 가려 버튼을 못 누르게 되는 문제 방지 */
+  background: var(--brand); color: #fff;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem;
   padding: .6rem 16px;
 }
 .top h1 { margin: 0; font-size: 1.3rem; }

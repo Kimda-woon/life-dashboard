@@ -18,7 +18,8 @@
   document.querySelector('.size').addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (b) setScale(+b.dataset.scale);
   });
-  setScale(load('subway.scale', 1.25));
+  var savedScale = +load('subway.scale', 1.25);
+  setScale(savedScale >= 1 && savedScale <= 1.5 ? savedScale : 1.25);
 
   // ---------- 역 검색 (이름 일부 / 초성) ----------
   var CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
@@ -87,7 +88,8 @@
       else inputs[w].blur();
     });
   });
-  document.addEventListener('pointerdown', function (e) {
+  // 'pointerdown'으로 닫으면 목록이 사라지며 화면이 밀려 손가락 아래 버튼이 빠져나가므로, 손을 뗀 뒤(click)에 닫는다.
+  document.addEventListener('click', function (e) {
     if (!e.target.closest('.field')) { lists.from.hidden = true; lists.to.hidden = true; }
   });
   $('swap').addEventListener('click', function () {
@@ -142,16 +144,33 @@
   }
 
   function transferHtml(prev, next) {
+    var same = prev.line.id === next.line.id;
     return '<div class="transfer"><p><b>🔁 갈아타기</b></p>' +
-      '<p>' + yeok(prev.to) + '에서 내린 뒤 ' + badge(next.line, next.line.name + ' (' + next.line.colorName + ')') + ' 표지판을 따라가세요.</p>' +
+      (same
+        ? '<p>' + yeok(prev.to) + '에서 내린 뒤 ' + badge(next.line, next.line.name) + ' <b>다른 열차</b>로 갈아타세요. 같은 호선이지만 가는 길이 갈라져서 열차가 달라요.</p>'
+        : '<p>' + yeok(prev.to) + '에서 내린 뒤 ' + badge(next.line, next.line.name + ' (' + next.line.colorName + ')') + ' 표지판을 따라가세요.</p>') +
       '<p>걷는 길이 길 수 있어요. 천천히 가세요.</p></div>';
+  }
+
+  function unresolvedMsg(text, what) {
+    var t = text.trim();
+    if (!t) return what + ' 역을 써 주세요.';
+    return search(t).length > 1
+      ? '“' + t + '”(이)라는 역이 여러 개예요. 아래 목록에서 알맞은 역을 눌러 주세요.'
+      : '“' + t + '” 역을 못 찾았어요. 다른 이름으로 써 보세요.';
+  }
+
+  // 실패하면 안내 문구와 함께 그 칸의 후보 목록을 다시 보여 준다 (버튼을 누르며 닫힌 목록 복구)
+  function fail(which, what) {
+    showMsg(unresolvedMsg(inputs[which].value, what));
+    setTimeout(function () { renderSuggest(which); }, 0);
   }
 
   function find() {
     showMsg('');
     var a = resolve(inputs.from.value), b = resolve(inputs.to.value);
-    if (!a) return showMsg(inputs.from.value.trim() ? '“' + inputs.from.value.trim() + '” 역을 못 찾았어요. 목록에서 골라 주세요.' : '타는 역을 써 주세요.');
-    if (!b) return showMsg(inputs.to.value.trim() ? '“' + inputs.to.value.trim() + '” 역을 못 찾았어요. 목록에서 골라 주세요.' : '내릴 역을 써 주세요.');
+    if (!a) return fail('from', '타는');
+    if (!b) return fail('to', '내릴');
     if (a === b) return showMsg('타는 역과 내리는 역이 같아요.');
     inputs.from.value = a; inputs.to.value = b;
     lists.from.hidden = lists.to.hidden = true;
