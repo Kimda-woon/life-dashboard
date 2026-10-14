@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.01.5'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.14.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -1211,6 +1211,24 @@
   const openDlg = (d) => { if (typeof d.showModal === 'function') d.showModal(); else { d.classList.add('fallback'); d.setAttribute('open', ''); } };
   const closeDlg = () => { const d = $('#dlg'); if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); };
 
+  /* ---------- 앱 안 확인창 ---------- */
+  // 폰 기본 확인창(confirm)은 아이폰에서 '대화상자 차단'을 한 번 누르면 이후 늘 '취소'로 처리돼 삭제가 안 됨 → 직접 그림
+  let askResolve = null;
+  function ask(msg) {
+    return new Promise((resolve) => {
+      if (askResolve) askResolve(false);
+      askResolve = resolve;
+      const del = /지울|지워|되돌릴|바꿀까요/.test(msg);
+      const dlg = $('#dlg');
+      dlg.innerHTML = `<div class="dlg ask"><p class="ask-msg">${esc(msg)}</p>
+        <div class="row end"><button type="button" class="btn ghost" data-ask="0">취소</button><button type="button" class="btn ${del ? 'danger' : 'primary'}" data-ask="1">${/지울|지워/.test(msg) ? '지우기' : '확인'}</button></div></div>`;
+      openDlg(dlg);
+      setTimeout(() => dlg.querySelector('[data-ask="1"]')?.focus(), 0);
+    });
+  }
+  // 바깥을 누르거나 뒤로 가기·Esc로 닫으면 '취소'
+  $('#dlg').addEventListener('close', () => { if (askResolve) { const r = askResolve; askResolve = null; r(false); } });
+
   /* ---------- 금액 입력 창 ---------- */
   function openAmount(kind) {
     const dlg = $('#dlg');
@@ -1240,7 +1258,10 @@
   }
 
   /* ---------- 이벤트 ---------- */
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
+    // 앱 안 확인창의 [취소]/[확인]
+    const askBtn = e.target.closest('[data-ask]');
+    if (askBtn) { const r = askResolve; askResolve = null; closeDlg(); if (r) r(askBtn.dataset.ask === '1'); return; }
     const tabBtn = e.target.closest('.tabs button');
     if (tabBtn) return go(tabBtn.dataset.tab);
 
@@ -1287,7 +1308,7 @@
         break;
       }
       case 'peak-del': {
-        if (!confirm('이 작은 산을 지울까요?')) return;
+        if (!await ask('이 작은 산을 지울까요?')) return;
         HORIZONS.forEach(([h]) => { state.vision.peaks[h] = (state.vision.peaks[h] || []).filter((x) => x.id !== id); });
         state.tasks.forEach((t) => { if (t.peakId === id) t.peakId = null; });
         break;
@@ -1331,7 +1352,7 @@
       }
       case 'step-del': {
         const pk = findPeak(id);
-        if (!pk || !confirm('이 작은 목표를 지울까요?')) return;
+        if (!pk || !await ask('이 작은 목표를 지울까요?')) return;
         pk.steps = pk.steps.filter((x) => x.id !== el.dataset.sid);
         state.tasks.forEach((t) => { if (t.stepId === el.dataset.sid) t.stepId = null; });
         syncPeakDone(pk);
@@ -1349,7 +1370,7 @@
       }
       case 'rt-edit': routineEditing = !routineEditing; render(); return;
       case 'rt-move': if (!moveIn(state.routines, id, Number(el.dataset.n))) return; break;
-      case 'rt-del': if (!confirm('이 루틴을 지울까요?')) return; state.routines = state.routines.filter((x) => x.id !== id); if (!state.routines.length) routineEditing = false; break;
+      case 'rt-del': if (!await ask('이 루틴을 지울까요?')) return; state.routines = state.routines.filter((x) => x.id !== id); if (!state.routines.length) routineEditing = false; break;
       case 'peak-push': {
         const pk = findPeak(id);
         if (!pk) return;
@@ -1377,13 +1398,13 @@
       }
       case 'park-out': {
         const x = state.parked.find((p) => p.id === id);
-        if (!x || !confirm(`'${x.text}'을(를) 오늘 할 일로 꺼낼까요? 틀에 새 일을 더하는 거예요.`)) return;
+        if (!x || !await ask(`'${x.text}'을(를) 오늘 할 일로 꺼낼까요? 틀에 새 일을 더하는 거예요.`)) return;
         state.tasks.push({ id: uid(), text: x.text, cat: 'etc', goalId: null, peakId: null, stepId: null, done: false, created: today(), doneDate: null });
         state.parked = state.parked.filter((p) => p.id !== id);
         toast('↩︎ 할 일(기타)로 옮겼어요');
         break;
       }
-      case 'park-del': if (!confirm('보류함에서 지울까요?')) return; state.parked = state.parked.filter((p) => p.id !== id); break;
+      case 'park-del': if (!await ask('보류함에서 지울까요?')) return; state.parked = state.parked.filter((p) => p.id !== id); break;
       case 'park-edit': parkEditing = !parkEditing; parkOpen = true; render(); return;
       case 'struct-edit':
         structEditing = !structEditing;
@@ -1405,11 +1426,11 @@
       case 'struct-del': {
         const k = el.dataset.kind;
         const x = state.structure[k].find((y) => y.id === id);
-        if (x && (x.name || x.text) && !confirm(`'${x.name || x.text}'을(를) 지울까요?`)) return;
+        if (x && (x.name || x.text) && !await ask(`'${x.name || x.text}'을(를) 지울까요?`)) return;
         state.structure[k] = state.structure[k].filter((y) => y.id !== id);
         break;
       }
-      case 'struct-reset': if (!confirm('올해의 큰 구조를 처음 내용으로 되돌릴까요? 고친 내용은 사라져요.')) return; state.structure = DEFAULT_STRUCTURE(); break;
+      case 'struct-reset': if (!await ask('올해의 큰 구조를 처음 내용으로 되돌릴까요? 고친 내용은 사라져요.')) return; state.structure = DEFAULT_STRUCTURE(); break;
       case 'rule-day': ruleDay = el.dataset.d || null; render(); $('.rules')?.scrollIntoView({ block: 'nearest' }); return;
       case 'rule-tick': {
         const t = el.dataset.d || today();
@@ -1435,7 +1456,7 @@
         const w = findWork(el.dataset.w);
         if (!w) return;
         const from = w.next, to = w.next + w.batch - 1;
-        if (!confirm(`${w.name} ${from}~${to}화를 출력했나요?`)) return;
+        if (!await ask(`${w.name} ${from}~${to}화를 출력했나요?`)) return;
         for (let n = from; n <= to; n++) if (!w.eps.some((x) => x.n === n)) w.eps.push({ n, st: 'out', out: today(), chk: '', res: '' });
         w.next = to + 1;
         toast(`📤 ${w.name} ${from}~${to}화 출력 완료 · 평일에 검수해요`);
@@ -1444,7 +1465,7 @@
       case 'sr-reserve': {
         const w = findWork(el.dataset.w);
         const chk = w ? epsBy(w, 'checked') : [];
-        if (!chk.length || !confirm(`${w.name} 검수 완료 ${chk.length}화(${chk[0].n}~${chk[chk.length - 1].n}화)를 예약했나요?`)) return;
+        if (!chk.length || !await ask(`${w.name} 검수 완료 ${chk.length}화(${chk[0].n}~${chk[chk.length - 1].n}화)를 예약했나요?`)) return;
         chk.forEach((e) => { e.st = 'reserved'; e.res = today(); });
         // 예약 끝난 화는 최근 50화만 보관
         const res = epsBy(w, 'reserved');
@@ -1454,7 +1475,7 @@
       }
       case 'rule-del': {
         const d = el.dataset.day;
-        if (!confirm('이 규칙을 지울까요?')) return;
+        if (!await ask('이 규칙을 지울까요?')) return;
         state.rules[d] = rulesOf(d).filter((r) => r.id !== id);
         break;
       }
@@ -1463,14 +1484,14 @@
         const c = state.cats.find((x) => x.id === id);
         if (!c || id === 'etc') return;
         const n = state.tasks.filter((t) => t.cat === id && !t.done).length;
-        if (!confirm(`'${c.label}' 종류를 지울까요?${n ? ` 남은 할 일 ${n}개는 기타로 옮겨져요.` : ''}`)) return;
+        if (!await ask(`'${c.label}' 종류를 지울까요?${n ? ` 남은 할 일 ${n}개는 기타로 옮겨져요.` : ''}`)) return;
         state.tasks.forEach((t) => { if (t.cat === id) t.cat = 'etc'; });
         state.cats = state.cats.filter((x) => x.id !== id);
         break;
       }
       case 'work-del': {
         const w = findWork(id);
-        if (!w || !confirm(`'${w.name}' 작품을 지울까요? 이 작품의 화별 기록도 지워져요.`)) return;
+        if (!w || !await ask(`'${w.name}' 작품을 지울까요? 이 작품의 화별 기록도 지워져요.`)) return;
         state.serials = state.serials.filter((x) => x.id !== id);
         break;
       }
@@ -1527,8 +1548,8 @@
       }
       case 'ck-pick': ckPick = Number(el.dataset.i); render(); $('#checkin')?.scrollIntoView({ block: 'nearest' }); return;
       case 'open-amount': return openAmount(el.dataset.kind);
-      case 'del-income': if (!confirm('이 수입 기록을 지울까요?')) return; state.incomes = state.incomes.filter((i) => i.id !== id); break;
-      case 'del-pay': if (!confirm('이 상환 기록을 지울까요?')) return; state.debt.payments = state.debt.payments.filter((p) => p.id !== id); break;
+      case 'del-income': if (!await ask('이 수입 기록을 지울까요?')) return; state.incomes = state.incomes.filter((i) => i.id !== id); break;
+      case 'del-pay': if (!await ask('이 상환 기록을 지울까요?')) return; state.debt.payments = state.debt.payments.filter((p) => p.id !== id); break;
       case 'del-fixed': state.fixed = state.fixed.filter((f) => f.id !== id); break;
       case 'preset': { const n = $('#fixed-name'); n.value = el.dataset.name; n.nextElementSibling.focus(); return; }
       case 'stat-open': statOpen = statOpen === el.dataset.k ? null : el.dataset.k; render(); return;
@@ -1545,11 +1566,11 @@
         if (g) { g.done = !g.done; if (g.done) toast('🎯 1년 목표 달성! 대단해요'); }
         break;
       }
-      case 'del-goal': if (!confirm('이 목표를 지울까요?')) return; state.vision.goals = state.vision.goals.filter((g) => g.id !== id); break;
+      case 'del-goal': if (!await ask('이 목표를 지울까요?')) return; state.vision.goals = state.vision.goals.filter((g) => g.id !== id); break;
       case 'week-shift': statOpen = null; reviewWeek = addDays(reviewWeek, num(el.dataset.n)); render(); return;
       case 'export': return exportData();
       case 'reset':
-        if (!confirm('정말 모든 기록을 지울까요? 되돌릴 수 없어요.')) return;
+        if (!await ask('정말 모든 기록을 지울까요? 되돌릴 수 없어요.')) return;
         state = defaultState();
         toast('처음 상태로 돌아왔어요');
         break;
@@ -1851,7 +1872,7 @@
   }
 
   // 복사해 온 기록(글)을 읽어서 지금 기록과 바꿈
-  function importText(raw) {
+  async function importText(raw) {
     // 메모 앱을 거치며 앞뒤에 붙은 글자나 줄바꿈이 있어도 { … } 부분만 읽음
     const body = raw.includes(TRANSFER_TAG) ? raw.slice(raw.indexOf(TRANSFER_TAG) + TRANSFER_TAG.length) : raw;
     let data;
@@ -1859,7 +1880,7 @@
       data = JSON.parse(body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1));
       if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
     } catch (err) { toast('기록을 읽을 수 없어요. 📋 기록 복사하기로 복사한 글 전체인지 확인해 주세요'); return; }
-    if (!confirm('지금 이 화면의 기록을 복사해 온 기록으로 바꿀까요?')) return;
+    if (!await ask('지금 이 화면의 기록을 복사해 온 기록으로 바꿀까요?')) return;
     state = merge(defaultState(), data);
     save();
     render();
@@ -1882,11 +1903,11 @@
   function importData(file) {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
         if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
-        if (!confirm('지금 기록을 백업 파일 내용으로 바꿀까요?')) return;
+        if (!await ask('지금 기록을 백업 파일 내용으로 바꿀까요?')) return;
         state = merge(defaultState(), data);
         save();
         render();

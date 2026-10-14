@@ -535,3 +535,8 @@ body.typing .tabs { display: none; }
 .done-day { padding: 10px 0 4px; }
 .done-day > b { font-size: 13px; color: var(--muted); }
 .done-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+
+/* 앱 안 확인창 */
+.dlg.ask { min-width: 260px; }
+.ask-msg { font-size: 16px; font-weight: 700; line-height: 1.5; white-space: pre-line; }
+.dlg.ask .btn.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
