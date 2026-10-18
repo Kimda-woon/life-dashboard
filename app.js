@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.14.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.18.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -115,7 +115,6 @@
       month: { key: '', text: '', prev: '' },
       week: { key: '', items: ['', '', ''], prev: [] },
     },
-    routines: [],                                 // 매주 루틴 [{id, text, perWeek, days:[날짜]}]
     cats: DEFAULT_CATS(),                         // 할 일 종류
     rules: DEFAULT_RULES(),                       // 요일별 규칙
     ruleLog: {},                                  // 규칙 체크 {날짜: [규칙 id]}
@@ -131,7 +130,7 @@
     out.vision = { ...base.vision, ...(data.vision || {}) };
     ['quarter', 'month', 'week', 'why', 'peaks'].forEach((k) => { out.vision[k] = { ...base.vision[k], ...(out.vision[k] || {}) }; });
     if (out.vision.y3 == null) out.vision.y3 = '';
-    if (!Array.isArray(out.routines)) out.routines = [];
+    delete out.routines; // 매주 루틴 기능은 없앰
     // 회사 생활 규칙으로 바뀌기 전 기록: 옛 할 일 종류를 새 종류로 옮김 (보너스 → 드라마, 나머지 → 기타)
     if (!Array.isArray(data.cats) || !data.cats.length) {
       out.cats = DEFAULT_CATS();
@@ -231,13 +230,12 @@
       linked: done.filter((t) => t.goalId || t.peakId).length,
       peaks: allPeaks().filter((pk) => pk.done && inWeek(pk.doneDate)).length,
       steps: allPeaks().reduce((a, pk) => a + (pk.steps || []).filter((st) => st.done && inWeek(st.doneDate)).length, 0),
-      routine: state.routines.length ? `${state.routines.filter((r) => routineCount(r, ws) >= r.perWeek).length}/${state.routines.length}` : '-',
     };
   }
 
   const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   const isEmptyState = () => !state.tasks.length && !state.fixed.length && !state.incomes.length && !state.debt.payments.length
-    && !state.vision.goals.length && !state.vision.y10 && !state.vision.y5 && !state.vision.y3 && !state.vision.y1 && !state.routines.length;
+    && !state.vision.goals.length && !state.vision.y10 && !state.vision.y5 && !state.vision.y3 && !state.vision.y1;
   const TRANSFER_TAG = '나의운영실기록:';
 
   /* ---------- 작은 산(이정표) ---------- */
@@ -486,8 +484,6 @@
 
       ${survivalCard(true)}
 
-      ${routineCard()}
-
       <section class="card">
         <div class="card-head"><h2>✅ 오늘 할 일</h2><button class="btn sm ghost" data-act="go-cats">종류 바꾸기</button></div>
         ${(() => { const n = state.tasks.filter((x) => !x.done && x.due && x.due <= t).length; return n ? `<p class="due-count">🔴 오늘까지 해야 할 일 ${n}개</p>` : ''; })()}
@@ -528,6 +524,7 @@
     if (r.kind === 'out') return state.serials.some((w) => (!r.work || w.id === r.work) && w.eps.some((e) => e.out === date));
     return false;
   }
+  const weekDays = (ws = weekStart()) => Array.from({ length: 7 }, (_, i) => addDays(ws, i));
   const dayScore = (date) => { const l = rulesOf(parseYmd(date).getDay()); return { done: l.filter((r) => ruleDone(r, date)).length, total: l.length }; };
 
   let ruleDay = null; // 규칙 카드에서 보고 있는 날 (null = 오늘)
@@ -645,44 +642,6 @@
       <button class="btn sm" data-act="struct-add" data-kind="dropped" style="margin-top:8px">+ 뺀 것 더하기</button>
       <label class="why" style="margin-top:14px"><span>지킬 원칙</span><textarea class="grow-text st-long" rows="1" data-struct="principle">${esc(S.principle)}</textarea></label>
       <button class="btn sm ghost" data-act="struct-reset" style="margin-top:12px">처음 내용으로 되돌리기</button>
-    </section>`;
-  }
-
-  /* ---------- 🔁 매주 루틴 ---------- */
-  const weekDays = (ws = weekStart()) => Array.from({ length: 7 }, (_, i) => addDays(ws, i));
-  const routineCount = (r, ws = weekStart()) => { const w = weekDays(ws); return (r.days || []).filter((d) => w.includes(d)).length; };
-  let routineEditing = false;
-
-  function routineCard() {
-    const list = state.routines;
-    const t = today();
-    const days = weekDays();
-    const full = list.filter((r) => routineCount(r) >= r.perWeek).length;
-    return `<section class="card routine">
-      <div class="card-head"><h2>🔁 매주 루틴</h2><span class="muted">${list.length ? `이번 주 ${full}/${list.length} 채움` : '매주 하는 습관'}</span></div>
-      ${list.length ? `<div class="rt-head">${days.map((d) => `<span class="${d === t ? 'today' : ''}">${DAYS[parseYmd(d).getDay()]}</span>`).join('')}</div>` : ''}
-      ${list.map((r) => {
-        const c = routineCount(r);
-        const ok = c >= r.perWeek;
-        return `<div class="rt-row ${ok ? 'ok' : ''}">
-          <div class="rt-name">${routineEditing
-            ? `<input data-routine="${r.id}" value="${esc(r.text)}" aria-label="루틴 이름">`
-            : `<b>${esc(r.text)}</b>`}<span class="muted small rt-count">${ok ? '✓ ' : ''}${c}/${r.perWeek}회</span></div>
-          ${days.map((d) => `<button class="rt-day ${(r.days || []).includes(d) ? 'on' : ''} ${d === t ? 'today' : ''}" data-act="rt-tick" data-id="${r.id}" data-d="${d}" ${d > t ? 'disabled' : ''} aria-label="${shortDate(d)} ${esc(r.text)}">${(r.days || []).includes(d) ? '✓' : ''}</button>`).join('')}
-          ${routineEditing ? `<span class="rt-tools">
-            <select data-routine-per="${r.id}" aria-label="주 몇 회">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${r.perWeek === n ? 'selected' : ''}>주 ${n}회</option>`).join('')}</select>
-            <button class="btn sm" data-act="rt-move" data-id="${r.id}" data-n="-1" aria-label="위로">▲ 위로</button>
-            <button class="btn sm" data-act="rt-move" data-id="${r.id}" data-n="1" aria-label="아래로">▼ 아래로</button>
-            <button class="btn sm ghost" data-act="rt-del" data-id="${r.id}" aria-label="삭제">✕ 지우기</button></span>` : ''}
-        </div>`;
-      }).join('')}
-      ${!list.length ? '<p class="muted small">운동 주 3회, 블로그 주 1회, 강아지 목욕처럼 매주 챙길 습관을 넣어 두세요. 한 날을 누르면 ✓ 표시되고, 월요일마다 새로 시작해요.</p>' : ''}
-      <form class="add-task" data-form="routine" style="margin-top:10px">
-        <input name="routine" placeholder="루틴 (예: 운동)" autocomplete="off" style="flex:2">
-        <select name="per" aria-label="주 몇 회" style="flex:1;min-width:84px">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === 3 ? 'selected' : ''}>주 ${n}회</option>`).join('')}</select>
-        <button class="btn">추가</button>
-      </form>
-      ${list.length ? `<button class="btn sm ghost" style="margin-top:8px" data-act="rt-edit">${routineEditing ? '✓ 고치기 끝' : '✎ 루틴 고치기 · 순서 바꾸기'}</button>` : ''}
     </section>`;
   }
 
@@ -929,7 +888,7 @@
 
   /* ---------- 주간 리뷰 ---------- */
   let reviewWeek = null;
-  let statOpen = null; // 주간 리뷰에서 펼친 칸 ('done' | 'linked' | 'peaks' | 'steps' | 'routine')
+  let statOpen = null; // 주간 리뷰에서 펼친 칸 ('done' | 'linked' | 'peaks' | 'steps')
   // 누르면 아래에 내용이 펼쳐지는 숫자 칸 (내용이 없으면 누를 수 없음)
   const statBtn = (key, big, label, n) => `<button type="button" class="stat stat-btn ${statOpen === key ? 'open' : ''}" data-act="stat-open" data-k="${key}" ${n ? '' : 'disabled'} aria-expanded="${statOpen === key}"><b>${big}</b><span>${label}</span></button>`;
   function statDetail(key, ws) {
@@ -950,10 +909,6 @@
     if (key === 'steps') {
       const list = allPeaks().flatMap((pk) => (pk.steps || []).filter((x) => x.done && inWeek(x.doneDate)).map((x) => ({ x, pk })));
       return wrap('🪜 이룬 작은 목표', list.map(({ x, pk }) => `<div class="done-item"><span>✓ ${esc(x.text)} <span class="tag">⛰️ ${esc(pk.text)}</span></span><span class="muted small">${shortDate(x.doneDate)}</span></div>`).join(''));
-    }
-    if (key === 'routine') {
-      const days = weekDays(ws);
-      return wrap('🔁 루틴', state.routines.map((r) => { const c = routineCount(r, ws); const ok = c >= r.perWeek; return `<div class="done-item"><span>${ok ? '✓' : '·'} ${esc(r.text)} <span class="muted small">${c}/${r.perWeek}회</span></span><span class="rt-mini">${days.map((d) => `<i class="${(r.days || []).includes(d) ? 'on' : ''}" title="${shortDate(d)}">${DAYS[parseYmd(d).getDay()]}</i>`).join('')}</span></div>`; }).join(''));
     }
     return '';
   }
@@ -993,7 +948,6 @@
           ${statBtn('linked', `${st.done ? Math.round((st.linked / st.done) * 100) : 0}%`, '🎯 목표와 연결된 일', st.linked)}
           ${statBtn('peaks', `${st.peaks}개`, '⛰️ 넘은 작은 산', st.peaks)}
           ${statBtn('steps', `${st.steps ?? 0}개`, '🪜 이룬 작은 목표', st.steps)}
-          ${statBtn('routine', st.routine ?? '-', '🔁 채운 루틴', state.routines.length)}
         </div>
         ${statOpen ? statDetail(statOpen, ws) : ''}
       </section>
@@ -1060,15 +1014,16 @@
         ${[1, 2, 3, 4, 5, 6, 0].map((d) => `<div class="set-day">
           <b class="set-day-name ${d === 0 || d === 6 ? 'we' : ''}">${DAYS[d]}</b>
           <div class="set-day-list">
-            ${rulesOf(d).map((r) => `<div class="set-row">
+            ${rulesOf(d).map((r, i, l) => `<div class="set-row">
               <input data-rule-day="${d}" data-rule="${r.id}" value="${esc(r.text)}" aria-label="${DAYS[d]}요일 규칙">
               ${r.kind ? '<span class="link-ic" title="연재 보드와 연결">🔗</span>' : ''}
+              <span class="mv-pair"><button class="mv" data-act="rule-move" data-day="${d}" data-id="${r.id}" data-n="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로">▲</button><button class="mv" data-act="rule-move" data-day="${d}" data-id="${r.id}" data-n="1" ${i === l.length - 1 ? 'disabled' : ''} aria-label="아래로">▼</button></span>
               <button class="icon-btn" data-act="rule-del" data-day="${d}" data-id="${r.id}" aria-label="삭제">✕</button>
             </div>`).join('')}
             <form class="set-add" data-form="rule" data-day="${d}"><input name="rule" placeholder="+ 규칙 더하기" autocomplete="off"><button class="btn sm">추가</button></form>
           </div>
         </div>`).join('')}
-        <p class="hint">🔗 표시는 연재 보드와 연결된 규칙이에요. 그날 예약·출력을 하면 저절로 체크돼요.</p>
+        <p class="hint">▲▼로 순서를 바꾸면 오늘 탭에도 그 순서대로 나와요. 🔗 표시는 연재 보드와 연결된 규칙이에요. 그날 예약·출력을 하면 저절로 체크돼요.</p>
       </section>
 
       <section class="card" id="cats-set">
@@ -1358,19 +1313,6 @@
         syncPeakDone(pk);
         break;
       }
-      case 'rt-tick': {
-        const r = state.routines.find((x) => x.id === id);
-        const d = el.dataset.d;
-        if (!r || d > today()) return;
-        const had = r.days.includes(d);
-        r.days = had ? r.days.filter((x) => x !== d) : [...r.days, d];
-        r.days = r.days.filter((x) => x >= addDays(weekStart(), -7 * 26)); // 반년 치만 보관
-        if (!had && routineCount(r) === r.perWeek) toast(`🔁 "${r.text}" 이번 주 목표 채웠어요!`);
-        break;
-      }
-      case 'rt-edit': routineEditing = !routineEditing; render(); return;
-      case 'rt-move': if (!moveIn(state.routines, id, Number(el.dataset.n))) return; break;
-      case 'rt-del': if (!await ask('이 루틴을 지울까요?')) return; state.routines = state.routines.filter((x) => x.id !== id); if (!state.routines.length) routineEditing = false; break;
       case 'peak-push': {
         const pk = findPeak(id);
         if (!pk) return;
@@ -1479,6 +1421,7 @@
         state.rules[d] = rulesOf(d).filter((r) => r.id !== id);
         break;
       }
+      case 'rule-move': if (!moveIn(rulesOf(el.dataset.day), id, Number(el.dataset.n))) return; break;
       case 'cat-move': if (!moveIn(state.cats, id, Number(el.dataset.n))) return; break;
       case 'cat-del': {
         const c = state.cats.find((x) => x.id === id);
@@ -1600,11 +1543,6 @@
       toast('이름을 비워 둘 수 없어요');
       return;
     }
-    if (el.dataset.routinePer) {
-      const r = state.routines.find((x) => x.id === el.dataset.routinePer);
-      if (r) { r.perWeek = num(el.value) || 1; save(); render(); }
-      return;
-    }
     if (el.dataset.act === 'import') return importData(el.files[0]);
     if (el.dataset.bind && el.hasAttribute('data-rerender')) {
       setPath(el.dataset.bind, el.value);
@@ -1656,6 +1594,8 @@
   }, { passive: true });
   document.addEventListener('scroll', () => { if (document.body.classList.contains('typing')) syncTyping(); }, { passive: true });
   document.addEventListener('visibilitychange', syncTyping);
+  // 아이폰은 확대 금지 설정을 무시해서, 두 손가락 확대를 직접 막음
+  ['gesturestart', 'gesturechange'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
   // 한글 조합이 끝난 뒤 금액 칸 정리
   document.addEventListener('compositionend', (e) => {
     if (e.target.hasAttribute?.('data-money')) { formatMoneyInput(e.target, false); updatePreview(e.target); }
@@ -1713,11 +1653,6 @@
       }
       return;
     }
-    if (el.dataset.routine) {
-      const r = state.routines.find((x) => x.id === el.dataset.routine);
-      if (r) { r.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
-      return;
-    }
     if (el.dataset.peak && el.dataset.field !== 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk[el.dataset.field] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
@@ -1771,14 +1706,6 @@
       save();
       render();
       $(`form[data-form=step][data-id="${pk.id}"] input`)?.focus();
-      return;
-    }
-    if (kind === 'routine') {
-      const text = val('routine');
-      if (!text) return;
-      state.routines.push({ id: uid(), text, perWeek: Math.min(7, Math.max(1, num(val('per')) || 1)), days: [] });
-      save();
-      render('[name=routine]');
       return;
     }
     if (kind === 'park') {
