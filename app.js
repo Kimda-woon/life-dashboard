@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.18.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.26.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -16,33 +16,6 @@
   const monthKey = (s = today()) => s.slice(0, 7);
   const quarterKey = (s = today()) => `${s.slice(0, 4)}-Q${Math.floor((Number(s.slice(5, 7)) - 1) / 3) + 1}`;
   const num = (v) => { const n = Number(String(v ?? '').replace(/[^\d.-]/g, '')); return Number.isFinite(n) ? n : 0; };
-  // 금액 읽기: "500,000", "50만", "50만원", "1억 2천만", "35만 5천" 모두 이해
-  const parseSub = (t) => { // 만 아래 단위: "2천5백", "3500"
-    let n = 0;
-    t = t.replace(/(\d*(?:\.\d+)?)천/, (_, d) => { n += (d ? Number(d) : 1) * 1000; return ''; });
-    t = t.replace(/(\d*(?:\.\d+)?)백/, (_, d) => { n += (d ? Number(d) : 1) * 100; return ''; });
-    return n + num(t);
-  };
-  const parseMoney = (v) => {
-    const t = String(v ?? '').replace(/[,\s원]/g, '');
-    if (!/[억만천백]/.test(t)) return Math.max(0, Math.round(num(t)));
-    const [eok, restE] = t.includes('억') ? t.split('억') : ['', t];
-    const [man, rest] = restE.includes('만') ? restE.split('만') : ['', restE];
-    const total = (t.includes('억') ? (parseSub(eok) || 1) * 1e8 : 0)
-      + (restE.includes('만') ? (parseSub(man) || 1) * 1e4 : 0)
-      + parseSub(rest);
-    return Math.max(0, Math.round(total));
-  };
-  const won = (n) => Math.round(n).toLocaleString('ko-KR') + '원';
-  const man = (n) => {
-    n = Math.round(n);
-    const sign = n < 0 ? '-' : '';
-    n = Math.abs(n);
-    if (n >= 10000) { const m = n / 10000; return sign + (Number.isInteger(m) ? m : m.toFixed(1)) + '만원'; }
-    return sign + n.toLocaleString('ko-KR') + '원';
-  };
-  const sum = (arr) => arr.reduce((a, x) => a + num(x.amount), 0);
-  const pct = (a, b) => (b > 0 ? Math.max(0, Math.min(100, (a / b) * 100)) : 0);
   const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
   const shortDate = (s) => { const d = parseYmd(s); return `${d.getMonth() + 1}/${d.getDate()}(${DAYS[d.getDay()]})`; };
 
@@ -93,8 +66,6 @@
   });
   const catList = () => state.cats;
   const catOf = (id) => state.cats.find((c) => c.id === id) || state.cats.find((c) => c.id === 'etc');
-  const SOURCES = ['외주·알바', '웹소설·숏노블', '워크숍·강의', '전자책·템플릿', '드라마', '기타'];
-  const FIXED_PRESETS = ['월세', '관리비', '통신비', '보험', '카드 할부', '식비', '교통비', '강아지 사료', '강아지 병원', '구독료'];
 
   /* ---------- 상태 ---------- */
   const defaultState = () => ({
@@ -102,9 +73,7 @@
     onboardDismissed: false,
     tasks: [],
     slots: {},
-    debt: { start: 5000000, targetDate: '', payments: [] },
-    incomes: [],
-    fixed: [],
+    experiments: [],                              // 성장 실험 [{id, think, test, start, end, status:'run'|'done', result, what, learn, change, from, doneDate}]
     vision: {
       y10: '', y5: '', y3: '', y1: '',
       why: { y10: '', y5: '', y3: '', y1: '' },   // 목표마다 목적(왜)
@@ -126,11 +95,12 @@
 
   function merge(base, data) {
     const out = { ...base, ...data };
-    out.debt = { ...base.debt, ...(data.debt || {}) };
     out.vision = { ...base.vision, ...(data.vision || {}) };
     ['quarter', 'month', 'week', 'why', 'peaks'].forEach((k) => { out.vision[k] = { ...base.vision[k], ...(out.vision[k] || {}) }; });
     if (out.vision.y3 == null) out.vision.y3 = '';
     delete out.routines; // 매주 루틴 기능은 없앰
+    // 가계부(빚·수입·고정비)는 화면에서 뺐지만, 적어 둔 기록은 지우지 않고 백업에 그대로 남김
+    if (!Array.isArray(out.experiments)) out.experiments = [];
     // 회사 생활 규칙으로 바뀌기 전 기록: 옛 할 일 종류를 새 종류로 옮김 (보너스 → 드라마, 나머지 → 기타)
     if (!Array.isArray(data.cats) || !data.cats.length) {
       out.cats = DEFAULT_CATS();
@@ -185,34 +155,6 @@
   }
 
   /* ---------- 계산 ---------- */
-  const debtPaid = () => sum(state.debt.payments);
-  const debtLeft = () => Math.max(0, num(state.debt.start) - debtPaid());
-
-  function debtPlan() {
-    const mk = monthKey();
-    const paidThisMonth = sum(state.debt.payments.filter((p) => monthKey(p.date) === mk));
-    const left = debtLeft();
-    if (!state.debt.targetDate || left <= 0) return { monthly: 0, paidThisMonth, months: 0 };
-    const now = new Date();
-    const t = parseYmd(state.debt.targetDate);
-    const months = Math.max(1, (t.getFullYear() - now.getFullYear()) * 12 + (t.getMonth() - now.getMonth()) + 1);
-    const monthly = Math.ceil((left + paidThisMonth) / months / 1000) * 1000;
-    return { monthly, paidThisMonth, months };
-  }
-
-  function survival() {
-    const fixed = sum(state.fixed);
-    const { monthly } = debtPlan();
-    const need = fixed + monthly;
-    const mk = monthKey();
-    const earned = sum(state.incomes.filter((i) => monthKey(i.date) === mk));
-    const now = new Date();
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const daysLeft = lastDay - now.getDate() + 1;
-    const gap = Math.max(0, need - earned);
-    return { fixed, debtMonthly: monthly, need, earned, gap, daysLeft, perDay: gap / daysLeft };
-  }
-
   function weekStats(ws) {
     const we = addDays(ws, 6);
     const inWeek = (d) => d && d >= ws && d <= we;
@@ -221,8 +163,8 @@
     for (let i = 0; i < 7; i++) { const d = addDays(ws, i); if (d > today()) break; const k = dayScore(d); ruleDoneN += k.done; ruleTotal += k.total; }
     const eps = state.serials.flatMap((w) => w.eps);
     return {
-      income: sum(state.incomes.filter((i) => inWeek(i.date))),
-      paid: sum(state.debt.payments.filter((p) => inWeek(p.date))),
+      expRun: state.experiments.filter((x) => x.start && x.start <= we && (x.status !== 'done' || x.doneDate >= ws)).length,
+      expDone: state.experiments.filter((x) => x.status === 'done' && inWeek(x.doneDate)).length,
       done: done.length,
       rules: `${ruleDoneN}/${ruleTotal}`,
       checked: eps.filter((e) => inWeek(e.chk)).length,
@@ -234,7 +176,7 @@
   }
 
   const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-  const isEmptyState = () => !state.tasks.length && !state.fixed.length && !state.incomes.length && !state.debt.payments.length
+  const isEmptyState = () => !state.tasks.length && !state.experiments.length
     && !state.vision.goals.length && !state.vision.y10 && !state.vision.y5 && !state.vision.y3 && !state.vision.y1;
   const TRANSFER_TAG = '나의운영실기록:';
 
@@ -407,25 +349,6 @@
   /* ---------- 공통 조각 ---------- */
   const goalName = (id) => (state.vision.goals.find((g) => g.id === id) || {}).text;
 
-  function survivalCard(compact) {
-    const s = survival();
-    if (!s.need) {
-      return `<section class="card">
-        <div class="card-head"><h2>🛟 이번 달 생존선</h2></div>
-        <p class="muted">고정비를 적으면 이번 달에 꼭 벌어야 할 돈이 나와요.</p>
-        <button class="btn sm" data-act="go" data-to="money" style="margin-top:10px">고정비 적으러 가기 →</button>
-      </section>`;
-    }
-    const ok = s.earned >= s.need;
-    return `<section class="card">
-      <div class="card-head"><h2>🛟 이번 달 생존선</h2><span class="muted">${s.daysLeft}일 남음</span></div>
-      <div class="row between"><div><div class="mid">${man(s.earned)} <span class="muted">/ ${man(s.need)}</span></div></div></div>
-      <div class="bar ${ok ? '' : 'fire'}" style="margin-top:8px"><i style="width:${pct(s.earned, s.need)}%"></i></div>
-      <p class="hint">${ok ? '🎉 생존선 넘었어요! 이제부터 버는 돈은 빚과 미래에 쓸 수 있어요.' : `앞으로 <b>${man(s.gap)}</b> 더 필요해요 · 하루 평균 <b>${man(s.perDay)}</b>`}</p>
-      ${compact ? '' : `<p class="hint">고정비 ${man(s.fixed)} + 이번 달 빚 상환 목표 ${man(s.debtMonthly)}</p>`}
-    </section>`;
-  }
-
   /* ---------- 오늘 ---------- */
   let newCat = null;
   let pendingPeak = null; // '오늘 할 일로' 누른 작은 산
@@ -441,8 +364,7 @@
     const weekItems = v.week.items.filter(Boolean);
 
     const steps = [
-      { ok: state.fixed.length > 0, text: '매달 나가는 고정비 적기', to: 'money' },
-      { ok: !!state.debt.targetDate, text: '빚을 언제까지 0으로 만들지 정하기', to: 'money' },
+      { ok: state.experiments.length > 0, text: '첫 실험 하나 시작하기', to: 'grow' },
       { ok: v.goals.length > 0, text: '1년 목표 하나 적기', to: 'vision' },
     ];
     const showOnboard = !state.onboardDismissed && steps.some((s) => !s.ok);
@@ -461,7 +383,7 @@
     return `<div class="stack">
       ${showOnboard ? `<section class="card accent">
         <div class="card-head"><h2>👋 처음 시작하기</h2><button class="icon-btn" data-act="dismiss-onboard" aria-label="닫기">✕</button></div>
-        <p class="muted">세 가지만 하면 준비 끝이에요. 5분이면 돼요.</p>
+        <p class="muted">두 가지만 하면 준비 끝이에요. 5분이면 돼요.</p>
         <ol class="steps">${steps.map((s, i) => `<li class="${s.ok ? 'ok' : ''}"><span class="dot">${s.ok ? '✓' : i + 1}</span><span class="grow">${s.text}</span>${s.ok ? '' : `<button class="btn sm" data-act="go" data-to="${s.to}">하기</button>`}</li>`).join('')}</ol>
       </section>` : ''}
 
@@ -482,7 +404,7 @@
 
       ${serialCard()}
 
-      ${survivalCard(true)}
+      ${expTodayCard()}
 
       <section class="card">
         <div class="card-head"><h2>✅ 오늘 할 일</h2><button class="btn sm ghost" data-act="go-cats">종류 바꾸기</button></div>
@@ -735,78 +657,143 @@
     </div>`;
   }
 
-  /* ---------- 돈 ---------- */
-  function renderMoney() {
-    const start = num(state.debt.start);
-    const paid = debtPaid();
-    const left = debtLeft();
-    const plan = debtPlan();
-    const unit = start / 10;
-    const blocks = Array.from({ length: 10 }, (_, i) => {
-      const f = unit > 0 ? Math.max(0, Math.min(1, (paid - i * unit) / unit)) : 0;
-      return `<i style="--f:${f * 100}%"></i>`;
+  /* ---------- 🌱 성장 루틴: 생각 → 시험 → 결과 → 배움 → 수정 → 다시 생각 ---------- */
+  const LOOP = [['think', '💡', '생각', 'think'], ['test', '📋', '시험', 'test'], ['fail', '❌', '결과', 'fail'], ['learn', '📖', '배움', 'learn'], ['change', '⚙️', '수정', 'change']];
+  const RESULTS = { good: ['✓', '잘 됨'], meh: ['△', '애매'], bad: ['✕', '안 됨'] };
+  const runningExps = () => state.experiments.filter((x) => x.status !== 'done');
+  const pastExps = () => state.experiments.filter((x) => x.status === 'done').sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
+  const findExp = (id) => id && state.experiments.find((x) => x.id === id);
+  const newExp = (think, from = null) => ({ id: uid(), think, test: '', start: today(), end: addDays(today(), 13), status: 'run', result: '', what: '', learn: '', change: '', from, doneDate: '' });
+  // 몇 번째로 이어진 실험인지 (1차, 2차 …)
+  const expGen = (x) => { let n = 1; for (let p = findExp(x.from); p && n < 99; p = findExp(p.from)) n++; return n; };
+  const expWriting = new Set(); // '결과 적기'를 누른 실험
+  const expShowResult = (x) => expWriting.has(x.id) || !!(x.result || x.what || x.learn || x.change);
+  function expStage(x) {
+    if (!x.test) return 'think';
+    if (!expShowResult(x)) return 'test';
+    if (!x.result && !x.what) return 'fail';
+    if (!x.learn) return 'learn';
+    return 'change';
+  }
+  const expOver = (x) => !!x.end && x.end < today();
+  const expDue = (x) => {
+    if (!x.end) return '';
+    const n = daysBetween(today(), x.end);
+    return n > 0 ? `D-${n}` : n === 0 ? 'D-day' : '기간 끝';
+  };
+
+  // 사진처럼 다섯 칸을 둥글게 잇는 고리. 진행 중인 실험이 있는 단계에 불이 들어옴
+  function loopCard() {
+    const run = runningExps();
+    const at = (k) => run.filter((x) => expStage(x) === k).length;
+    const pt = (deg, r = 38) => { const a = deg * Math.PI / 180; return [50 + r * Math.cos(a), 50 + r * Math.sin(a)]; };
+    const arcs = LOOP.map((_, i) => {
+      const [x1, y1] = pt(-90 + i * 72 + 21), [x2, y2] = pt(-90 + (i + 1) * 72 - 21);
+      return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A38 38 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" marker-end="url(#lp-arrow)"/>`;
     }).join('');
-
-    const mk = monthKey();
-    const monthIncome = state.incomes.filter((i) => monthKey(i.date) === mk);
-    const bySrc = SOURCES.map((s) => ({ s, v: sum(monthIncome.filter((i) => i.source === s)) })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
-    const maxSrc = bySrc.length ? bySrc[0].v : 0;
-    const recentIncome = [...state.incomes].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
-    const payments = [...state.debt.payments].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
-    const fixedTotal = sum(state.fixed);
-
-    return `<div class="stack">
-      <div class="big-actions">
-        <button class="btn good" data-act="open-amount" data-kind="income">💰 돈 들어왔어요</button>
-        <button class="btn fire" data-act="open-amount" data-kind="pay">✅ 빚 갚았어요</button>
+    const first = run[0] && LOOP.find(([k]) => k === expStage(run[0]));
+    return `<section class="card loop-card">
+      <div class="card-head"><h2>🔄 성장 루프</h2>${run.length ? `<span class="muted">실험 ${run.length}개 진행 중</span>` : ''}</div>
+      <div class="loop">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <defs><marker id="lp-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M1 1 L8 5 L1 9"/></marker></defs>
+          ${arcs}
+        </svg>
+        ${LOOP.map(([k, ic, label, en], i) => { const [x, y] = pt(-90 + i * 72); const n = at(k); return `<div class="lp-node ${n ? 'on' : ''}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%"><span class="lp-ic">${ic}${n > 1 ? `<i>${n}</i>` : ''}</span><b>${label}</b><small>${en}</small></div>`; }).join('')}
+        <p class="lp-center">${first ? `지금은<br><b>${first[2]}</b> 단계` : '실패도<br>한 칸이에요'}</p>
       </div>
+      <p class="hint" style="text-align:center">해 보고, 실패해도 배우고, 바꿔서 다시</p>
+    </section>`;
+  }
 
-      <section class="card">
-        <div class="card-head"><h2>🏔️ 빚 ${man(start)} → 0 챌린지</h2><span class="muted">${Math.round(pct(paid, start))}%</span></div>
-        <p class="muted small">남은 빚</p>
-        <div class="big">${left <= 0 ? '0원 🎉' : won(left)}</div>
-        <div class="blocks" aria-label="칸 하나 = ${man(unit)}">${blocks}</div>
-        <p class="hint">칸 하나 = ${man(unit)} · 지금까지 ${man(paid)} 갚았어요</p>
+  function expCard(x) {
+    const idx = LOOP.findIndex(([k]) => k === expStage(x));
+    const parent = findExp(x.from);
+    const gen = expGen(x);
+    const over = expOver(x);
+    const ta = (field, ph) => `<textarea class="exp-text" rows="2" data-exp="${x.id}" data-field="${field}" placeholder="${ph}">${esc(x[field])}</textarea>`;
+    return `<section class="card exp">
+      <div class="card-head"><h2>🧪 현재 실험${gen > 1 ? ` <span class="tag">${gen}차</span>` : ''}</h2>${x.end ? `<span class="muted ${over ? 'exp-over' : ''}">${expDue(x)}</span>` : ''}</div>
+      ${parent ? `<p class="exp-from">↪︎ "${esc(parent.think)}"의 수정 방향에서 이어졌어요</p>` : ''}
+      <div class="exp-steps">${LOOP.map(([, ic, label], i) => `<span class="${i < idx ? 'done' : i === idx ? 'on' : ''}">${ic} ${label}</span>`).join('')}</div>
+      <label class="field"><span>💡 생각 · 가설</span>${ta('think', '예: 출근 전 30분 쓰면 주 5화를 지킬 수 있다')}</label>
+      <label class="field"><span>📋 어떻게 시험할까</span>${ta('test', '예: 2주 동안 평일 7:00~7:30엔 원고만 쓰기')}</label>
+      <div class="field"><span>기간</span>
+        <div class="exp-dates"><input type="date" data-exp="${x.id}" data-field="start" value="${esc(x.start)}" aria-label="시작하는 날"><span class="muted">~</span><input type="date" data-exp="${x.id}" data-field="end" value="${esc(x.end)}" min="${esc(x.start)}" aria-label="끝나는 날"></div>
+        <div class="chips" style="margin-top:6px">${[[7, '1주'], [14, '2주'], [28, '4주']].map(([n, l]) => `<button type="button" class="chip ${x.start && x.end === addDays(x.start, n - 1) ? 'on' : ''}" data-act="exp-len" data-id="${x.id}" data-n="${n}">${l}</button>`).join('')}</div>
+      </div>
+      ${expShowResult(x) ? `<div class="exp-result">
+        <h3>📊 실험 결과</h3>
+        <div class="chips" role="radiogroup" aria-label="결과">${Object.entries(RESULTS).map(([k, [ic, l]]) => `<button type="button" class="chip ${x.result === k ? 'on' : ''}" role="radio" aria-checked="${x.result === k}" data-act="exp-result" data-id="${x.id}" data-v="${k}">${ic} ${l}</button>`).join('')}</div>
+        <label class="field"><span>어떻게 됐나요</span>${ta('what', '예: 첫 주는 지켰는데, 야근한 다음 날은 두 번 빠짐')}</label>
+        <label class="field"><span>📖 배운 점</span>${ta('learn', '예: 야근한 다음 날 아침엔 의지로 안 된다')}</label>
+        <label class="field"><span>⚙️ 수정 방향</span>${ta('change', '예: 야근 다음 날은 출퇴근길 검수로 바꾸기')}</label>
+        <button class="btn primary block" style="margin-top:14px" data-act="exp-next" data-id="${x.id}">⚙️ 이 방향으로 다음 실험 시작</button>
+        <p class="hint">수정 방향이 다음 실험의 '생각'이 돼요. 고리가 한 바퀴 돌아요.</p>
+      </div>` : `${over ? '<p class="exp-nudge">⏰ 기간이 끝났어요. 어떻게 됐는지 적어 볼까요?</p>' : ''}
+      <button class="btn ${over ? 'primary' : ''} block" style="margin-top:12px" data-act="exp-write" data-id="${x.id}">📊 결과 적기</button>`}
+      <div class="row end" style="margin-top:8px">
+        ${expShowResult(x) ? `<button class="btn sm ghost" data-act="exp-end" data-id="${x.id}">여기서 끝내기</button>` : ''}
+        <button class="btn sm ghost danger" data-act="exp-del" data-id="${x.id}">지우기</button>
+      </div>
+    </section>`;
+  }
 
-        <label class="field"><span>언제까지 0으로 만들까요?</span>
-          <input type="date" data-bind="debt.targetDate" data-rerender value="${esc(state.debt.targetDate)}" min="${today()}">
-        </label>
-        ${state.debt.targetDate && left > 0 ? `<div class="stat" style="margin-top:10px">
-          <b>매달 ${man(plan.monthly)}씩</b>
-          <span>${plan.months}개월 동안 갚으면 ${shortDate(state.debt.targetDate)}에 0원이 돼요</span>
-          <div class="bar thin" style="margin-top:8px"><i style="width:${pct(plan.paidThisMonth, plan.monthly)}%"></i></div>
-          <span>이번 달 ${man(plan.paidThisMonth)} / ${man(plan.monthly)}</span>
-        </div>` : ''}
-        ${!state.debt.targetDate ? `<p class="hint">날짜를 정하면 매달 얼마씩 갚으면 되는지 계산해 드려요. 예: 1년 뒤</p>` : ''}
-      </section>
-
-      ${survivalCard(false)}
-
-      <section class="card">
-        <div class="card-head"><h2>💰 이번 달 들어온 돈</h2><span class="muted">${man(sum(monthIncome))}</span></div>
-        ${bySrc.length ? bySrc.map((x) => `<div class="src-row"><span>${esc(x.s)}</span><div class="bar thin"><i style="width:${pct(x.v, maxSrc)}%"></i></div><b>${man(x.v)}</b></div>`).join('')
-          : '<p class="empty">아직 기록이 없어요. 돈이 들어오면 위의 💰 버튼을 눌러 주세요.<br>어떤 일이 실제로 돈이 되는지 보이기 시작해요.</p>'}
-        ${recentIncome.length ? `<h3 style="margin-top:16px">최근 기록</h3><ul class="list">${recentIncome.map((i) => `<li><span class="when">${shortDate(i.date)}</span><span class="grow">${esc(i.source)}${i.memo ? ` · <span class="muted">${esc(i.memo)}</span>` : ''}</span><span class="amt">${man(i.amount)}</span><button class="icon-btn" data-act="del-income" data-id="${i.id}" aria-label="삭제">✕</button></li>`).join('')}</ul>` : ''}
-      </section>
-
-      <section class="card">
-        <div class="card-head"><h2>📌 매달 나가는 고정비</h2><span class="muted">합계 ${man(fixedTotal)}</span></div>
-        ${state.fixed.length ? `<ul class="list">${state.fixed.map((f) => `<li><span class="grow">${esc(f.name)}</span><span class="amt">${won(num(f.amount))}</span><button class="icon-btn" data-act="del-fixed" data-id="${f.id}" aria-label="삭제">✕</button></li>`).join('')}</ul>` : '<p class="muted small">월세, 통신비, 강아지 사료처럼 매달 꼭 나가는 돈을 적어 주세요.</p>'}
-        <form data-form="fixed" style="margin-top:12px">
-          <div class="chips" style="margin-bottom:8px">${FIXED_PRESETS.filter((p) => !state.fixed.some((f) => f.name === p)).map((p) => `<button type="button" class="chip" data-act="preset" data-name="${esc(p)}">${esc(p)}</button>`).join('')}</div>
-          <div class="row">
-            <input name="name" placeholder="항목" autocomplete="off" style="flex:1;min-width:110px" id="fixed-name">
-            <input name="amount" placeholder="금액 (예: 50만)" inputmode="text" enterkeyhint="done" autocomplete="off" data-money style="flex:1;min-width:110px">
-            <button class="btn primary">추가</button>
+  function pastExpCard() {
+    const list = pastExps();
+    if (!list.length) return '';
+    const part = (label, v) => (v ? `<p class="exp-part"><b>${label}</b>${esc(v)}</p>` : '');
+    return `<section class="card">
+      <div class="card-head"><h2>🗂️ 지난 실험</h2><span class="muted">${list.length}개</span></div>
+      ${list.map((x) => {
+        const r = RESULTS[x.result];
+        const gen = expGen(x);
+        const next = state.experiments.find((y) => y.from === x.id);
+        return `<details class="exp-past">
+          <summary><span class="exp-badge ${esc(x.result)}">${r ? r[0] : '·'}</span><span class="grow">${esc(x.think) || '(생각 없음)'}${gen > 1 ? ` <span class="tag">${gen}차</span>` : ''}</span><span class="muted small">${x.doneDate ? shortDate(x.doneDate) : ''}</span></summary>
+          <div class="exp-body">
+            <p class="muted small">${x.start ? shortDate(x.start) : ''} ~ ${x.doneDate ? shortDate(x.doneDate) : ''}</p>
+            ${part('📋 시험', x.test)}
+            ${r || x.what ? `<p class="exp-part"><b>📊 결과${r ? ` · ${r[0]} ${r[1]}` : ''}</b>${esc(x.what)}</p>` : ''}
+            ${part('📖 배운 점', x.learn)}
+            ${part('⚙️ 수정 방향', x.change)}
+            ${next ? `<p class="exp-from">→ 다음 실험: ${esc(next.think)}</p>` : ''}
+            <div class="row end" style="margin-top:8px">
+              <button class="btn sm ghost" data-act="exp-reopen" data-id="${x.id}">↩︎ 다시 진행 중으로</button>
+              <button class="btn sm ghost danger" data-act="exp-del" data-id="${x.id}">지우기</button>
+            </div>
           </div>
-        </form>
-      </section>
+        </details>`;
+      }).join('')}
+    </section>`;
+  }
 
-      ${payments.length ? `<section class="card">
-        <div class="card-head"><h2>✅ 상환 기록</h2></div>
-        <ul class="list">${payments.map((p) => `<li><span class="when">${shortDate(p.date)}</span><span class="grow muted">${esc(p.memo || '상환')}</span><span class="amt">${man(p.amount)}</span><button class="icon-btn" data-act="del-pay" data-id="${p.id}" aria-label="삭제">✕</button></li>`).join('')}</ul>
-      </section>` : ''}
+  function renderGrow() {
+    const run = runningExps();
+    return `<div class="stack">
+      ${loopCard()}
+      ${run.map(expCard).join('')}
+      <form class="card" data-form="exp">
+        <div class="card-head"><h2>${run.length ? '➕ 실험 하나 더' : '🧪 현재 실험'}</h2></div>
+        ${run.length ? '' : '<p class="muted small" style="margin-bottom:8px">지금 하는 실험이 없어요. 작게 하나 시작해 볼까요? 실패해도 배운 게 남으면 한 바퀴 돈 거예요.</p>'}
+        <div class="add-task"><input name="think" placeholder="💡 해 볼 생각 (예: 퇴근길에 검수 2화씩)" autocomplete="off"><button class="btn primary">시작</button></div>
+        <p class="hint">시작하면 오늘부터 2주로 잡혀요. 기간은 언제든 바꿀 수 있어요.</p>
+      </form>
+      ${pastExpCard()}
     </div>`;
+  }
+
+  // 오늘 탭에 보이는 짧은 카드
+  function expTodayCard() {
+    const run = runningExps();
+    return `<section class="card">
+      <div class="card-head"><h2>🧪 현재 실험</h2><button class="btn sm ghost" data-act="go" data-to="grow">${run.length ? '성장 보기' : '시작하기'}</button></div>
+      ${run.length ? run.map((x) => {
+        const st = LOOP.find(([k]) => k === expStage(x));
+        const late = expOver(x) && !expShowResult(x);
+        return `<div class="exp-mini"><span class="exp-mini-ic" title="${st[2]} 단계">${st[1]}</span><span class="grow">${esc(x.think)}</span><span class="muted small ${expOver(x) ? 'exp-over' : ''}">${late ? '결과 적을 때' : expDue(x)}</span></div>`;
+      }).join('') : '<p class="muted small">지금 하는 실험이 없어요. 생각 → 시험 → 결과 → 배움 → 수정, 작게 한 바퀴 돌려 봐요.</p>'}
+    </section>`;
   }
 
   /* ---------- 비전 ---------- */
@@ -888,7 +875,7 @@
 
   /* ---------- 주간 리뷰 ---------- */
   let reviewWeek = null;
-  let statOpen = null; // 주간 리뷰에서 펼친 칸 ('done' | 'linked' | 'peaks' | 'steps')
+  let statOpen = null; // 주간 리뷰에서 펼친 칸 ('done' | 'linked' | 'peaks' | 'steps' | 'exps')
   // 누르면 아래에 내용이 펼쳐지는 숫자 칸 (내용이 없으면 누를 수 없음)
   const statBtn = (key, big, label, n) => `<button type="button" class="stat stat-btn ${statOpen === key ? 'open' : ''}" data-act="stat-open" data-k="${key}" ${n ? '' : 'disabled'} aria-expanded="${statOpen === key}"><b>${big}</b><span>${label}</span></button>`;
   function statDetail(key, ws) {
@@ -898,6 +885,10 @@
     const wrap = (title, body) => `<div class="done-list"><p class="detail-title">${title}</p>${body || empty}</div>`;
     const tagsOf = (x) => { const g = x.goalId && goalName(x.goalId); const pk = x.peakId && findPeak(x.peakId); return `${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}</span>` : ''}`; };
     if (key === 'done') return wrap('✅ 끝낸 일', doneList(ws));
+    if (key === 'exps') {
+      const list = state.experiments.filter((x) => x.status === 'done' && inWeek(x.doneDate));
+      return wrap('🔄 끝낸 실험', list.map((x) => `<div class="done-item"><span>${RESULTS[x.result]?.[0] || '·'} ${esc(x.think)}${x.learn ? `<br><span class="muted small">📖 ${esc(x.learn)}</span>` : ''}</span><span class="muted small">${shortDate(x.doneDate)}</span></div>`).join(''));
+    }
     if (key === 'linked') {
       const list = state.tasks.filter((x) => x.done && inWeek(x.doneDate) && (x.goalId || x.peakId)).sort((a, b) => b.doneDate.localeCompare(a.doneDate));
       return wrap('🎯 목표와 연결된 일', list.map((x) => `<div class="done-item"><span>✓ ${esc(x.text)} ${tagsOf(x)}</span><span class="muted small">${shortDate(x.doneDate)}</span></div>`).join(''));
@@ -940,8 +931,8 @@
           </span>
         </div>
         <div class="grid2">
-          <div class="stat"><b>${man(st.income)}</b><span>💰 들어온 돈</span></div>
-          <div class="stat"><b>${man(st.paid)}</b><span>✅ 갚은 빚</span></div>
+          <div class="stat"><b>${st.expRun}개</b><span>🧪 이번 주 실험</span></div>
+          ${statBtn('exps', `${st.expDone}개`, '🔄 끝낸 실험', st.expDone)}
           <div class="stat"><b>${st.rules}</b><span>📅 지킨 규칙</span></div>
           <div class="stat"><b>${st.checked}화 · ${st.reserved}화</b><span>📚 검수 · 예약</span></div>
           ${statBtn('done', `${st.done}개`, '✅ 끝낸 일 전체', st.done)}
@@ -979,7 +970,7 @@
 
       ${past.length ? `<section class="card">
         <div class="card-head"><h2>🗂️ 지난 리뷰</h2></div>
-        ${past.map((p) => `<details class="review"><summary>${shortDate(p.week)} 주 · 💰 ${man(p.stats?.income || 0)} · ${p.stats?.rules ? `📅 규칙 ${p.stats.rules}` : `🔥 ${p.stats?.fire || 0}개`}</summary>
+        ${past.map((p) => `<details class="review"><summary>${shortDate(p.week)} 주 · ${p.stats?.rules ? `📅 규칙 ${p.stats.rules}` : `🔥 ${p.stats?.fire || 0}개`}</summary>
           <div class="body">${p.wins ? `잘한 것\n${esc(p.wins)}\n\n` : ''}${p.lesson ? `배운 것\n${esc(p.lesson)}\n\n` : ''}${p.next.filter(Boolean).length ? `다음 주 핵심\n${p.next.filter(Boolean).map((n) => '· ' + esc(n)).join('\n')}` : ''}</div>
         </details>`).join('')}
       </section>` : ''}
@@ -992,20 +983,13 @@
       <section class="card guide">
         <div class="card-head"><h2>📖 사용법</h2></div>
         <ol>
-          <li><b>처음 한 번</b>: 돈 탭에서 고정비와 빚 목표 날짜, 비전 탭에서 1년 목표를 적어요. 요일별 규칙과 할 일 종류는 이 화면 아래에서 바꿀 수 있어요.</li>
+          <li><b>처음 한 번</b>: 비전 탭에서 1년 목표를 적고, 🌱 성장 탭에서 첫 실험을 하나 시작해요. 요일별 규칙과 할 일 종류는 이 화면 아래에서 바꿀 수 있어요.</li>
           <li><b>매일</b>: 오늘 탭의 📅 오늘의 규칙을 체크해요. 출퇴근길에 검수한 화는 📚 연재에서 눌러 검수 완료로 옮겨요.</li>
           <li><b>일요일</b>: 📚 연재에서 검수분 예약 → 다음 5화 출력. 반나절 안에 끝내고 쉬어요.</li>
-          <li><b>돈이 오가면</b>: 돈 탭의 💰 / ✅ 버튼을 눌러 기록해요. 생존선과 빚 게이지가 자동으로 움직여요.</li>
+          <li><b>실험할 때</b>: 🌱 성장 탭에서 생각 → 시험 → 결과 → 배움 → 수정 순서로 적어요. 수정 방향은 다음 실험의 생각으로 이어져요.</li>
           <li><b>주말</b>: 주간 리뷰 5분. 지킨 규칙과 연재 화수가 자동으로 모여요.</li>
           <li><b>한 달에 한 번</b>: 비전 탭을 다시 읽고 이번 달 목표를 적어요.</li>
         </ol>
-      </section>
-
-      <section class="card">
-        <div class="card-head"><h2>🏔️ 빚 시작 금액</h2></div>
-        <input data-bind="debt.start" data-type="money" data-money inputmode="text" enterkeyhint="done" value="${num(state.debt.start).toLocaleString('ko-KR')}">
-        <p class="hint">숫자로 적거나 "500만"처럼 적어도 돼요.</p>
-        <p class="hint">챌린지를 시작할 때의 총 빚이에요. 새로 생긴 빚이 있으면 여기서 늘려 주세요.</p>
       </section>
 
       <section class="card" id="rules-set">
@@ -1086,7 +1070,7 @@
   }
 
   /* ---------- 렌더 ---------- */
-  const TABS = { today: renderToday, money: renderMoney, vision: renderVision, review: renderReview, settings: renderSettings };
+  const TABS = { today: renderToday, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
   let tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : 'today';
 
   // 화면을 그리는 도중 입력칸이 사라지며 생기는 blur/change로 다시 그리기가 겹치지 않게 함
@@ -1105,7 +1089,7 @@
     $('#app').innerHTML = TABS[tab]();
     document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
     if (focusSel) { const el = $(focusSel); if (el) el.focus(); }
-    document.querySelectorAll('.grow-text').forEach(autoGrow);
+    document.querySelectorAll('.grow-text, .exp-text').forEach(autoGrow);
     setTimeout(syncTyping, 0);
   }
 
@@ -1184,34 +1168,6 @@
   // 바깥을 누르거나 뒤로 가기·Esc로 닫으면 '취소'
   $('#dlg').addEventListener('close', () => { if (askResolve) { const r = askResolve; askResolve = null; r(false); } });
 
-  /* ---------- 금액 입력 창 ---------- */
-  function openAmount(kind) {
-    const dlg = $('#dlg');
-    const isIncome = kind === 'income';
-    dlg.innerHTML = `<form class="dlg" data-form="amount" data-kind="${kind}">
-      <h2>${isIncome ? '💰 돈 들어왔어요' : '✅ 빚 갚았어요'}</h2>
-      <p class="muted small">${isIncome ? '작은 돈도 기록하면 어떤 일이 돈이 되는지 보여요.' : `남은 빚 ${won(debtLeft())}`}</p>
-      <label class="field"><span>금액</span>
-        <input name="amount" inputmode="text" enterkeyhint="done" autocomplete="off" placeholder="예: 300000 또는 30만" data-money required>
-        <small class="amount-preview"></small>
-      </label>
-      <div class="chips quick">${[10000, 50000, 100000, 500000].map((v) => `<button type="button" class="chip" data-add="${v}">+${man(v)}</button>`).join('')}</div>
-      ${isIncome ? `<div class="field"><span>어디서 들어온 돈인가요?</span><div class="chips">${SOURCES.map((s, i) => `<label class="chip-radio"><input type="radio" name="source" value="${esc(s)}" ${i === 0 ? 'checked' : ''}><span>${esc(s)}</span></label>`).join('')}</div></div>` : ''}
-      <label class="field"><span>날짜</span><input type="date" name="date" value="${today()}" max="${today()}"></label>
-      <label class="field"><span>메모 (선택)</span><input name="memo" autocomplete="off" placeholder="${isIncome ? '예: 9월 원고료' : '예: 카드값 일부'}"></label>
-      <div class="row end"><button type="button" class="btn ghost" data-close>취소</button><button class="btn primary">저장</button></div>
-    </form>`;
-    openDlg(dlg);
-    // 누른 그 순간에 바로 커서를 넣어야 아이폰에서 키보드가 뜸 (타이머로 미루면 커서만 생김)
-    dlg.querySelector('[name=amount]').focus();
-  }
-
-  function updatePreview(input) {
-    const p = input.closest('.field')?.querySelector('.amount-preview');
-    const v = parseMoney(input.value);
-    if (p) p.textContent = v ? `= ${won(v)} (${man(v)})` : '';
-  }
-
   /* ---------- 이벤트 ---------- */
   document.addEventListener('click', async (e) => {
     // 앱 안 확인창의 [취소]/[확인]
@@ -1221,13 +1177,6 @@
     if (tabBtn) return go(tabBtn.dataset.tab);
 
     if (e.target.closest('[data-close]')) return closeDlg();
-    const add = e.target.closest('[data-add]');
-    if (add) {
-      const input = $('#dlg [name=amount]');
-      input.value = (parseMoney(input.value) + num(add.dataset.add)).toLocaleString('ko-KR');
-      updatePreview(input);
-      return;
-    }
 
     const el = e.target.closest('[data-act]');
     if (!el) return;
@@ -1490,11 +1439,31 @@
         break;
       }
       case 'ck-pick': ckPick = Number(el.dataset.i); render(); $('#checkin')?.scrollIntoView({ block: 'nearest' }); return;
-      case 'open-amount': return openAmount(el.dataset.kind);
-      case 'del-income': if (!await ask('이 수입 기록을 지울까요?')) return; state.incomes = state.incomes.filter((i) => i.id !== id); break;
-      case 'del-pay': if (!await ask('이 상환 기록을 지울까요?')) return; state.debt.payments = state.debt.payments.filter((p) => p.id !== id); break;
-      case 'del-fixed': state.fixed = state.fixed.filter((f) => f.id !== id); break;
-      case 'preset': { const n = $('#fixed-name'); n.value = el.dataset.name; n.nextElementSibling.focus(); return; }
+      case 'exp-write': expWriting.add(id); render(`[data-exp="${id}"][data-field="what"]`); return;
+      case 'exp-result': { const x = findExp(id); if (!x) return; x.result = x.result === el.dataset.v ? '' : el.dataset.v; break; }
+      case 'exp-len': { const x = findExp(id); if (!x) return; x.start = x.start || today(); x.end = addDays(x.start, Number(el.dataset.n) - 1); break; }
+      case 'exp-next': {
+        const x = findExp(id);
+        if (!x) return;
+        if (!x.change.trim()) { toast('⚙️ 수정 방향을 먼저 적어 주세요'); $(`[data-exp="${id}"][data-field="change"]`)?.focus(); return; }
+        x.status = 'done'; x.doneDate = today(); expWriting.delete(id);
+        const n = newExp(x.change.trim(), x.id);
+        state.experiments.splice(state.experiments.indexOf(x) + 1, 0, n);
+        save();
+        render(`[data-exp="${n.id}"][data-field="test"]`);
+        toast('🔄 다음 실험 시작! 어떻게 시험할지 적어 주세요');
+        return;
+      }
+      case 'exp-end': {
+        const x = findExp(id);
+        if (!x) return;
+        if (!x.result && !x.what && !x.learn && !await ask('결과를 안 적고 끝낼까요?')) return;
+        x.status = 'done'; x.doneDate = today(); expWriting.delete(id);
+        toast('🗂️ 지난 실험으로 옮겼어요');
+        break;
+      }
+      case 'exp-reopen': { const x = findExp(id); if (!x) return; x.status = 'run'; x.doneDate = ''; break; }
+      case 'exp-del': if (!await ask('이 실험을 지울까요?')) return; state.experiments = state.experiments.filter((x) => x.id !== id); expWriting.delete(id); break;
       case 'stat-open': statOpen = statOpen === el.dataset.k ? null : el.dataset.k; render(); return;
       case 'undo-done': {
         const x = state.tasks.find((y) => y.id === id);
@@ -1530,6 +1499,11 @@
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
       if (pk) { pk.due = el.value; save(); renderAfterPicker(el); }
+      return;
+    }
+    if (el.dataset.exp && (el.dataset.field === 'start' || el.dataset.field === 'end')) {
+      const x = findExp(el.dataset.exp);
+      if (x && el.value) { x[el.dataset.field] = el.value; if (x.end && x.end < x.start) x.end = x.start; save(); renderAfterPicker(el); }
       return;
     }
     if (el.dataset.work && el.dataset.field === 'batch') {
@@ -1596,10 +1570,6 @@
   document.addEventListener('visibilitychange', syncTyping);
   // 아이폰은 확대 금지 설정을 무시해서, 두 손가락 확대를 직접 막음
   ['gesturestart', 'gesturechange'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
-  // 한글 조합이 끝난 뒤 금액 칸 정리
-  document.addEventListener('compositionend', (e) => {
-    if (e.target.hasAttribute?.('data-money')) { formatMoneyInput(e.target, false); updatePreview(e.target); }
-  });
 
   // 긴 제목도 잘리지 않게 글 길이만큼 칸 높이를 늘림
   function autoGrow(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; }
@@ -1613,7 +1583,11 @@
     const el = e.target;
     // 한글 조합 중에 칸 내용을 건드리면 아이폰에서 글자가 안 써지므로, 줄바꿈이 들어온 경우에만 고침
     if (el.classList.contains('grow-text')) { if (!e.isComposing && el.value.includes('\n')) el.value = el.value.replace(/\n/g, ' '); autoGrow(el); }
-    if (el.hasAttribute('data-money')) { formatMoneyInput(el, e.isComposing); updatePreview(el); }
+    if (el.dataset.exp) {
+      const x = findExp(el.dataset.exp);
+      if (x && el.classList.contains('exp-text')) { x[el.dataset.field] = el.value; autoGrow(el); clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
+      return;
+    }
     if (el.dataset.step) {
       const st = findStep(findPeak(el.dataset.peak), el.dataset.step);
       if (st) { st.text = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
@@ -1659,7 +1633,7 @@
       return;
     }
     if (el.dataset.bind && !el.hasAttribute('data-rerender')) {
-      setPath(el.dataset.bind, el.dataset.type === 'money' ? parseMoney(el.value) : el.dataset.type === 'num' ? num(el.value) : el.value);
+      setPath(el.dataset.bind, el.dataset.type === 'num' ? num(el.value) : el.value);
       clearTimeout(bindTimer);
       bindTimer = setTimeout(save, 300);
     }
@@ -1747,29 +1721,14 @@
       render('[name=goal]');
       return;
     }
-    if (kind === 'fixed') {
-      const name = val('name');
-      const amount = parseMoney(val('amount'));
-      if (!name || !amount) { toast('항목과 금액을 둘 다 적어 주세요'); return; }
-      state.fixed.push({ id: uid(), name, amount });
+    if (kind === 'exp') {
+      const think = val('think');
+      if (!think) return;
+      const x = newExp(think);
+      state.experiments.push(x);
       save();
-      render('#fixed-name');
+      render(`[data-exp="${x.id}"][data-field="test"]`);
       return;
-    }
-    if (kind === 'amount') {
-      const amount = parseMoney(val('amount'));
-      if (amount <= 0) { toast('금액을 적어 주세요'); return; }
-      const date = val('date') || today();
-      const memo = val('memo');
-      if (f.dataset.kind === 'income') {
-        state.incomes.push({ id: uid(), amount, date, memo, source: val('source') || '기타' });
-        toast(`💰 ${man(amount)} 기록했어요`);
-      } else {
-        const before = debtLeft();
-        state.debt.payments.push({ id: uid(), amount, date, memo });
-        toast(before > 0 && debtLeft() <= 0 ? '🎉🎉 빚 0원 달성! 정말 해냈어요!' : `✅ ${man(amount)} 갚았어요. 남은 빚 ${man(debtLeft())}`);
-      }
-      closeDlg();
     }
     if (kind === 'review') {
       const next = [0, 1, 2].map((i) => val('next' + i));
@@ -1805,7 +1764,7 @@
     let data;
     try {
       data = JSON.parse(body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1));
-      if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
+      if (!data || typeof data !== 'object' || !('tasks' in data)) throw new Error('bad');
     } catch (err) { toast('기록을 읽을 수 없어요. 📋 기록 복사하기로 복사한 글 전체인지 확인해 주세요'); return; }
     if (!await ask('지금 이 화면의 기록을 복사해 온 기록으로 바꿀까요?')) return;
     state = merge(defaultState(), data);
@@ -1833,7 +1792,7 @@
     reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
-        if (!data || typeof data !== 'object' || !('debt' in data)) throw new Error('bad');
+        if (!data || typeof data !== 'object' || !('tasks' in data)) throw new Error('bad');
         if (!await ask('지금 기록을 백업 파일 내용으로 바꿀까요?')) return;
         state = merge(defaultState(), data);
         save();
