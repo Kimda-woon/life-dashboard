@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.27.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.27.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -376,7 +376,7 @@
         .sort((a, b) => a.done - b.done || (a.due || '9999').localeCompare(b.due || '9999'));
       return `<div class="lane">
         <div class="lane-head"><h3>${esc(c.icon)} ${esc(c.label)}</h3>${items.length ? `<span class="muted">${items.filter((x) => !x.done).length}개</span>` : ''}</div>
-        ${items.length ? items.map(taskRow).join('') : '<div class="lane-empty">비어 있어요</div>'}
+        ${items.length ? items.map((x) => taskRow(x)).join('') : '<div class="lane-empty">비어 있어요</div>'}
       </div>`;
     };
 
@@ -644,29 +644,41 @@
     return `<span class="due-tag ${cls}">📅 ${label}${left}</span>`;
   }
 
-  function taskRow(x) {
+  // extra: 지우기 버튼 앞에 붙일 버튼 (할 일 탭의 '오늘로'·'빼기')
+  function taskRow(x, extra = '') {
     const t = today();
     const g = x.goalId && goalName(x.goalId);
     const pk = x.peakId && findPeak(x.peakId);
     const urgent = !x.done && x.due ? (x.due === t ? 'due-today' : x.due < t ? 'due-over' : '') : '';
     return `<div class="task ${x.done ? 'done' : ''} ${urgent}">
       <input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료">
-      <span class="t"><textarea class="task-text grow-text" rows="1" data-task-text="${x.id}" aria-label="할 일 내용">${esc(x.text)}</textarea>${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 바꾸기">${dueTag(x)}</button>`}</span>` : ''}</span>
+      <span class="t"><textarea class="task-text grow-text" rows="1" data-task-text="${x.id}" aria-label="할 일 내용">${esc(x.text)}</textarea>${g ? `<span class="tag">🎯 ${esc(g)}</span>` : ''}${pk ? `<span class="tag">⛰️ ${esc(pk.text)}${findStep(pk, x.stepId) ? ` › ${esc(findStep(pk, x.stepId).text)}` : ''}</span>` : ''}${x.due ? `<span class="due-line">${x.done ? dueTag(x) : `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 바꾸기">${dueTag(x)}</button>`}</span>` : ''}${!x.done && x.day === t && !extra ? '<span class="tag today-tag">☀️ 오늘 할 일</span>' : ''}</span>
       ${!x.due && !x.done ? `<button type="button" class="due-pick" data-act="open-cal" data-id="${x.id}" aria-label="마감 날짜 넣기"><span class="due-add">📅</span></button>` : ''}
+      ${extra}
       <button class="icon-btn" data-act="del-task" data-id="${x.id}" aria-label="삭제">✕</button>
     </div>`;
   }
 
-  /* ---------- ✅ 할 일만 보기 (위에 이번 달 목표 1개 · 이번 주 목표 3개) ---------- */
+  /* ---------- ✅ 할 일: 오늘 날짜에 할 일만 (위에 이번 달 목표 1개 · 이번 주 목표 3개) ---------- */
+  // 오늘 할 일 = 오늘 하기로 넣은 일(day) + 마감이 오늘인 일
+  const isTodayTask = (x, t = today()) => x.day === t || x.due === t;
+  // 지난 날로 넣었거나 마감이 지났는데 아직 안 한 일
+  const isLateTask = (x, t = today()) => !isTodayTask(x, t) && ((x.day && x.day < t) || (x.due && x.due < t));
+  let pullOpen = false; // '다른 할 일에서 가져오기'를 펼쳐 둔 상태
+  document.addEventListener('toggle', (e) => { if (e.target.dataset?.keep === 'pull') pullOpen = e.target.open; }, true);
+
   function renderTodo() {
     const t = today();
     const v = state.vision;
     if (!catList().some((c) => c.id === newCat)) newCat = catList()[0].id;
     const open = state.tasks.filter((x) => !x.done);
-    const byDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999');
-    const urgent = open.filter((x) => x.due && x.due <= t).sort(byDue);
-    const groups = catList().map((c) => ({ c, items: open.filter((x) => !(x.due && x.due <= t) && catOf(x.cat).id === c.id).sort(byDue) })).filter((g) => g.items.length);
+    const todays = open.filter((x) => isTodayTask(x, t));
+    const late = open.filter((x) => isLateTask(x, t)).sort((a, b) => (a.day || a.due).localeCompare(b.day || b.due));
+    const rest = open.filter((x) => !isTodayTask(x, t) && !isLateTask(x, t)).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
     const doneToday = state.tasks.filter((x) => x.done && x.doneDate === t);
+    const toToday = (x) => `<button type="button" class="btn sm" data-act="task-today" data-id="${x.id}">☀️ 오늘로</button>`;
+    // 마감이 오늘인 일은 마감을 바꿔야 빠지므로 '빼기'는 오늘로 넣은 일에만
+    const unToday = (x) => (x.day === t && x.due !== t ? `<button type="button" class="btn sm ghost" data-act="task-unday" data-id="${x.id}" title="오늘 할 일에서 빼기">빼기</button>` : ' ');
     return `<div class="stack">
       <section class="card focus-goals">
         <div class="fg-block">
@@ -680,22 +692,33 @@
       </section>
 
       <section class="card">
-        <div class="card-head"><h2>✅ 오늘 할 일</h2><span class="muted">${open.length ? `${open.length}개 남음` : ''}</span></div>
-        <form class="add-task" data-form="task">
-          <input name="task" placeholder="예: 치과 예약 10/7까지" autocomplete="off" id="task-input">
+        <div class="card-head"><h2>☀️ ${shortDate(t)} 할 일</h2><span class="muted">${todays.length ? `${todays.length}개 남음` : ''}</span></div>
+        <form class="add-task" data-form="task" data-today="1">
+          <input name="task" placeholder="오늘 할 일 (예: 은행 서류 내기)" autocomplete="off" id="task-input">
           <button class="btn primary">추가</button>
         </form>
         <div class="chips" style="margin-top:8px" role="radiogroup" aria-label="종류">
           ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
         </div>
-        ${urgent.length ? `<div class="lane"><div class="lane-head"><h3>🔴 오늘까지</h3><span class="muted">${urgent.length}개</span></div>${urgent.map(taskRow).join('')}</div>` : ''}
-        ${groups.map(({ c, items }) => `<div class="lane"><div class="lane-head"><h3>${esc(c.icon)} ${esc(c.label)}</h3><span class="muted">${items.length}개</span></div>${items.map(taskRow).join('')}</div>`).join('')}
-        ${!open.length ? '<p class="empty">남은 일이 없어요 🎉</p>' : ''}
+        <div style="margin-top:10px">${todays.length ? todays.map((x) => taskRow(x, unToday(x))).join('') : `<p class="empty">${doneToday.length ? '오늘 할 일을 다 끝냈어요 🎉' : '오늘 할 일이 아직 없어요.<br>위에 적거나, 아래 다른 할 일에서 가져와요.'}</p>`}</div>
       </section>
+
+      ${late.length ? `<section class="card late-card">
+        <div class="card-head"><h2>⏰ 지난 날 못 한 일</h2><span class="muted">${late.length}개</span></div>
+        <p class="muted small" style="margin-bottom:6px">오늘 할 거면 ☀️ 오늘로 옮겨요.</p>
+        ${late.map((x) => taskRow(x, toToday(x))).join('')}
+      </section>` : ''}
+
+      ${rest.length ? `<section class="card">
+        <details ${pullOpen ? 'open' : ''} data-keep="pull" class="pull">
+          <summary><b>📥 다른 할 일에서 가져오기</b><span class="muted small">${rest.length}개</span></summary>
+          <div style="margin-top:8px">${rest.map((x) => taskRow(x, toToday(x))).join('')}</div>
+        </details>
+      </section>` : ''}
 
       ${doneToday.length ? `<section class="card">
         <div class="card-head"><h2>✓ 오늘 끝낸 일</h2><span class="muted">${doneToday.length}개</span></div>
-        ${doneToday.map(taskRow).join('')}
+        ${doneToday.map((x) => taskRow(x)).join('')}
       </section>` : ''}
     </div>`;
   }
@@ -1239,6 +1262,8 @@
         break;
       }
       case 'del-task': state.tasks = state.tasks.filter((t) => t.id !== id); break;
+      case 'task-today': { const x = state.tasks.find((t) => t.id === id); if (!x) return; x.day = today(); toast('☀️ 오늘 할 일로 넣었어요'); break; }
+      case 'task-unday': { const x = state.tasks.find((t) => t.id === id); if (!x) return; x.day = ''; toast('오늘 할 일에서 뺐어요'); break; }
       case 'peak-climb': {
         const pk = findPeak(id);
         if (!pk || pk.done) return;
@@ -1695,7 +1720,7 @@
       let due = newDue;
       const parsed = dueFromText(text);
       if (parsed) { text = parsed.text; due = due || parsed.due; }
-      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, stepId: (pendingPeak && pendingStep) || null, done: false, created: today(), doneDate: null, due: due || '' });
+      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, stepId: (pendingPeak && pendingStep) || null, done: false, created: today(), doneDate: null, due: due || '', day: f.dataset.today ? today() : '' });
       if (due) toast(`📅 ${shortDate(due)}까지로 넣었어요`);
       newDue = '';
       pendingPeak = null;
