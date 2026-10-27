@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.26.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.10.27.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -657,6 +657,49 @@
     </div>`;
   }
 
+  /* ---------- ✅ 할 일만 보기 (위에 이번 달 목표 1개 · 이번 주 목표 3개) ---------- */
+  function renderTodo() {
+    const t = today();
+    const v = state.vision;
+    if (!catList().some((c) => c.id === newCat)) newCat = catList()[0].id;
+    const open = state.tasks.filter((x) => !x.done);
+    const byDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999');
+    const urgent = open.filter((x) => x.due && x.due <= t).sort(byDue);
+    const groups = catList().map((c) => ({ c, items: open.filter((x) => !(x.due && x.due <= t) && catOf(x.cat).id === c.id).sort(byDue) })).filter((g) => g.items.length);
+    const doneToday = state.tasks.filter((x) => x.done && x.doneDate === t);
+    return `<div class="stack">
+      <section class="card focus-goals">
+        <div class="fg-block">
+          <span class="fg-label">📅 ${Number(t.slice(5, 7))}월 목표</span>
+          <textarea class="grow-text fg-input fg-month" rows="1" data-bind="vision.month.text" placeholder="이번 달 목표 하나" aria-label="이번 달 목표">${esc(v.month.text)}</textarea>
+        </div>
+        <div class="fg-block">
+          <span class="fg-label">📍 이번 주 목표</span>
+          ${[0, 1, 2].map((i) => `<div class="fg-week"><b>${i + 1}</b><textarea class="grow-text fg-input" rows="1" data-bind="vision.week.items.${i}" placeholder="이번 주 목표 ${i + 1}" aria-label="이번 주 목표 ${i + 1}">${esc(v.week.items[i] || '')}</textarea></div>`).join('')}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>✅ 오늘 할 일</h2><span class="muted">${open.length ? `${open.length}개 남음` : ''}</span></div>
+        <form class="add-task" data-form="task">
+          <input name="task" placeholder="예: 치과 예약 10/7까지" autocomplete="off" id="task-input">
+          <button class="btn primary">추가</button>
+        </form>
+        <div class="chips" style="margin-top:8px" role="radiogroup" aria-label="종류">
+          ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
+        </div>
+        ${urgent.length ? `<div class="lane"><div class="lane-head"><h3>🔴 오늘까지</h3><span class="muted">${urgent.length}개</span></div>${urgent.map(taskRow).join('')}</div>` : ''}
+        ${groups.map(({ c, items }) => `<div class="lane"><div class="lane-head"><h3>${esc(c.icon)} ${esc(c.label)}</h3><span class="muted">${items.length}개</span></div>${items.map(taskRow).join('')}</div>`).join('')}
+        ${!open.length ? '<p class="empty">남은 일이 없어요 🎉</p>' : ''}
+      </section>
+
+      ${doneToday.length ? `<section class="card">
+        <div class="card-head"><h2>✓ 오늘 끝낸 일</h2><span class="muted">${doneToday.length}개</span></div>
+        ${doneToday.map(taskRow).join('')}
+      </section>` : ''}
+    </div>`;
+  }
+
   /* ---------- 🌱 성장 루틴: 생각 → 시험 → 결과 → 배움 → 수정 → 다시 생각 ---------- */
   const LOOP = [['think', '💡', '생각', 'think'], ['test', '📋', '시험', 'test'], ['fail', '❌', '결과', 'fail'], ['learn', '📖', '배움', 'learn'], ['change', '⚙️', '수정', 'change']];
   const RESULTS = { good: ['✓', '잘 됨'], meh: ['△', '애매'], bad: ['✕', '안 됨'] };
@@ -1070,7 +1113,7 @@
   }
 
   /* ---------- 렌더 ---------- */
-  const TABS = { today: renderToday, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
+  const TABS = { today: renderToday, todo: renderTodo, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
   let tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : 'today';
 
   // 화면을 그리는 도중 입력칸이 사라지며 생기는 blur/change로 다시 그리기가 겹치지 않게 함
