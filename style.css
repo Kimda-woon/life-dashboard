@@ -547,3 +547,8 @@ body.typing .tabs { display: none; }
 .fg-week:first-of-type { border-top: 0; }
 .fg-week b { flex: none; width: 22px; height: 22px; margin-top: 4px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; display: grid; place-items: center; }
 .fg-week .fg-input { margin: 0; font-weight: 600; }
+.today-tag { background: var(--accent-soft); color: var(--accent); }
+.pull summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: none; }
+.pull summary::-webkit-details-marker { display: none; }
+.pull summary b::after { content: " ▾"; color: var(--muted); font-weight: 400; }
+.pull[open] summary b::after { content: " ▴"; }
