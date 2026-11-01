@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.10.27.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -73,6 +73,7 @@
     onboardDismissed: false,
     tasks: [],
     slots: {},
+    events: [],                                   // 일정 [{id, title, start, end, time, color, shape}]
     experiments: [],                              // 성장 실험 [{id, think, test, start, end, status:'run'|'done', result, what, learn, change, from, doneDate}]
     vision: {
       y10: '', y5: '', y3: '', y1: '',
@@ -101,6 +102,7 @@
     delete out.routines; // 매주 루틴 기능은 없앰
     // 가계부(빚·수입·고정비)는 화면에서 뺐지만, 적어 둔 기록은 지우지 않고 백업에 그대로 남김
     if (!Array.isArray(out.experiments)) out.experiments = [];
+    if (!Array.isArray(out.events)) out.events = [];
     // 회사 생활 규칙으로 바뀌기 전 기록: 옛 할 일 종류를 새 종류로 옮김 (보너스 → 드라마, 나머지 → 기타)
     if (!Array.isArray(data.cats) || !data.cats.length) {
       out.cats = DEFAULT_CATS();
@@ -659,6 +661,118 @@
     </div>`;
   }
 
+  /* ---------- 📅 일정 (달력) ---------- */
+  const EV_COLORS = ['노랑', '올리브', '파랑', '청록', '빨강', '보라', '초록'];
+  // 공휴일 (대체공휴일 포함). 2026~2027년만 들어 있어요. 그 뒤 해는 직접 일정으로 넣어 주세요.
+  const HOLIDAYS = {
+    '2026-01-01': '신정', '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴', '2026-03-01': '삼일절', '2026-03-02': '대체공휴일',
+    '2026-05-01': '노동절', '2026-05-05': '어린이날', '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일', '2026-06-03': '지방선거', '2026-06-06': '현충일',
+    '2026-07-17': '제헌절', '2026-08-15': '광복절', '2026-08-17': '대체공휴일', '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
+    '2026-10-03': '개천절', '2026-10-05': '대체공휴일', '2026-10-09': '한글날', '2026-12-25': '성탄절',
+    '2027-01-01': '신정', '2027-02-06': '설날 연휴', '2027-02-07': '설날', '2027-02-08': '설날 연휴', '2027-02-09': '대체공휴일', '2027-03-01': '삼일절',
+    '2027-05-01': '노동절', '2027-05-03': '대체공휴일', '2027-05-05': '어린이날', '2027-05-13': '부처님오신날', '2027-06-06': '현충일',
+    '2027-07-17': '제헌절', '2027-07-19': '대체공휴일', '2027-08-15': '광복절', '2027-08-16': '대체공휴일', '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴',
+    '2027-10-03': '개천절', '2027-10-04': '대체공휴일', '2027-10-09': '한글날', '2027-10-11': '대체공휴일', '2027-12-25': '성탄절', '2027-12-27': '대체공휴일',
+  };
+  let calMonth = null; // 보고 있는 달 'YYYY-MM'
+  let calSel = null;   // 고른 날 'YYYY-MM-DD'
+  const findEv = (id) => state.events.find((x) => x.id === id);
+  const evEnd = (e) => (e.end && e.end > e.start ? e.end : e.start);
+  const evc = (e) => Math.min(EV_COLORS.length - 1, Math.max(0, Number(e.color) || 0));
+  const evSort = (a, b) => (a.time || '').localeCompare(b.time || '') || a.start.localeCompare(b.start);
+
+  // 한 주(월~일)를 한 줄로: 날짜 칸 위에 하루짜리 일정 칸, 그 아래에 여러 날 일정(화살표 또는 칸)을 겹쳐 그림
+  function calWeek(ws, mk, t) {
+    const days = weekDays(ws), we = days[6];
+    const evs = state.events.filter((e) => e.start <= we && evEnd(e) >= ws);
+    const singles = evs.filter((e) => evEnd(e) === e.start).sort(evSort);
+    const multis = evs.filter((e) => evEnd(e) > e.start).sort((a, b) => a.start.localeCompare(b.start) || evEnd(b).localeCompare(evEnd(a)));
+    const hidden = Array(7).fill(0); // 자리가 모자라 못 그린 일정 수
+    const lanes = [];
+    multis.forEach((e) => {
+      const c0 = Math.max(0, daysBetween(ws, e.start)), c1 = Math.min(6, daysBetween(ws, evEnd(e)));
+      let L = lanes.findIndex((lane) => lane.every((b) => b.c1 < c0 || b.c0 > c1));
+      if (L < 0) L = lanes.length;
+      if (L >= 3) { for (let c = c0; c <= c1; c++) hidden[c]++; return; }
+      (lanes[L] = lanes[L] || []).push({ e, c0, c1 });
+    });
+    const cols = days.map((d, i) => {
+      const list = singles.filter((e) => e.start === d);
+      let show = list, more = hidden[i];
+      if (list.length + (more ? 1 : 0) > 3) { show = list.slice(0, 2); more = list.length - 2 + hidden[i]; }
+      return { show, more };
+    });
+    const A = Math.max(0, ...cols.map((c) => c.show.length + (c.more ? 1 : 0)));
+    const rows = `${days.some((d) => HOLIDAYS[d]) ? 36 : 24}px${A ? ` repeat(${A}, 18px)` : ''}${lanes.length ? ` repeat(${lanes.length}, 25px)` : ''} minmax(4px, 1fr)`;
+    const dayBtns = days.map((d, i) => {
+      const h = HOLIDAYS[d];
+      const due = state.tasks.filter((x) => !x.done && x.due === d).length; // 마감이 이 날인 안 끝낸 할 일
+      const cls = ['cd', d.slice(0, 7) !== mk && 'out', (i === 6 || h) && 'red', d === t && 'today', d === calSel && 'sel'].filter(Boolean).join(' ');
+      return `<button type="button" class="${cls}" data-act="cal-day" data-d="${d}" style="grid-column:${i + 1};grid-row:1/-1" aria-label="${shortDate(d)}${h ? ' ' + esc(h) : ''}${due ? ` 마감 할 일 ${due}개` : ''}"><span class="cd-n">${Number(d.slice(8))}</span>${h ? `<span class="cd-h">${esc(h)}</span>` : ''}${due ? `<i class="cd-dot ${d < t ? 'late' : ''}"></i>` : ''}</button>`;
+    }).join('');
+    const chips = cols.map(({ show, more }, i) => show.map((e, k) => `<span class="cchip c${evc(e)}" style="grid-column:${i + 1};grid-row:${2 + k}">${esc(e.title)}</span>`).join('')
+      + (more ? `<span class="cmore" style="grid-column:${i + 1};grid-row:${2 + show.length}">+${more}</span>` : '')).join('');
+    const bars = lanes.map((lane, L) => lane.map(({ e, c0, c1 }) => `<div class="cbar c${evc(e)} ${e.shape === 'fill' ? 'fill' : ''} ${e.start < ws ? 'ol' : ''} ${evEnd(e) > we ? 'or' : ''}" style="grid-column:${c0 + 1}/${c1 + 2};grid-row:${2 + A + L}"><span class="cb-line"></span><span class="cb-t">${esc(e.title)}</span></div>`).join('')).join('');
+    return `<div class="cweek" style="grid-template-rows:${rows}">${dayBtns}${chips}${bars}</div>`;
+  }
+
+  const evMeta = (e) => (evEnd(e) > e.start ? `${shortDate(e.start)} ~ ${shortDate(evEnd(e))} · ${daysBetween(e.start, evEnd(e)) + 1}일` : (e.time || '하루 종일'));
+  const evRow = (e) => `<button type="button" class="ev-row" data-act="ev-edit" data-id="${e.id}"><i class="ev-dot c${evc(e)}"></i><span class="grow"><b>${esc(e.title)}</b><small class="muted">${evMeta(e)}</small></span><span class="muted">›</span></button>`;
+
+  function renderCal() {
+    const t = today();
+    if (!calMonth) calMonth = monthKey(t);
+    if (!calSel) calSel = t;
+    const [y, m] = calMonth.split('-').map(Number);
+    const last = ymd(new Date(y, m, 0));
+    const weeks = [];
+    for (let ws = weekStart(`${calMonth}-01`); ws <= last; ws = addDays(ws, 7)) weeks.push(ws);
+    const day = state.events.filter((e) => e.start <= calSel && evEnd(e) >= calSel).sort(evSort);
+    const hol = HOLIDAYS[calSel];
+    const dueTasks = state.tasks.filter((x) => x.due === calSel).sort((a, b) => a.done - b.done);
+    return `<div class="stack">
+      <div class="cal-head">
+        <button class="btn sm ghost" data-act="cal-prev" aria-label="이전 달">‹</button>
+        <h2>${y}년 ${m}월</h2>
+        <button class="btn sm ghost" data-act="cal-next" aria-label="다음 달">›</button>
+        <button class="btn sm" data-act="cal-today">오늘</button>
+      </div>
+      <div class="cal">
+        <div class="cal-dow">${['월', '화', '수', '목', '금', '토', '일'].map((n, i) => `<span class="${i === 6 ? 'red' : ''}">${n}</span>`).join('')}</div>
+        ${weeks.map((ws) => calWeek(ws, calMonth, t)).join('')}
+      </div>
+      <section class="card">
+        <div class="card-head"><h2>${shortDate(calSel)}${calSel === t ? ' · 오늘' : ''}</h2><button class="btn sm primary" data-act="ev-add" data-d="${calSel}">+ 일정 추가</button></div>
+        ${hol ? `<p class="cal-hol">🎌 ${esc(hol)}</p>` : ''}
+        ${day.length ? day.map(evRow).join('') : (dueTasks.length ? '' : '<p class="empty">이 날 일정이 없어요.<br>날짜를 누르면 그날 일정이 여기 보여요.</p>')}
+        ${dueTasks.length ? `<h3 class="due-h">✅ 마감 할 일</h3>${dueTasks.map((x) => `<label class="due-row ${x.done ? 'done' : ''}"><input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료"><span class="grow">${esc(x.text)}</span><span class="muted small">${esc(catOf(x.cat).icon)}</span></label>`).join('')}` : ''}
+      </section>
+    </div>`;
+  }
+
+  // 일정 추가·고치기 창
+  function openEvent(id, d) {
+    const e = (id && findEv(id)) || { title: '', start: d, end: '', time: '', color: 0, shape: 'arrow' };
+    const dlg = $('#dlg');
+    dlg.innerHTML = `<form class="dlg" data-form="event" data-id="${id || ''}">
+      <h2>${id ? '일정 고치기' : '📅 일정 추가'}</h2>
+      <label class="field"><span>제목</span><input name="title" value="${esc(e.title)}" placeholder="예: 대본 수정" autocomplete="off" required></label>
+      <div class="grid2">
+        <label class="field"><span>시작</span><input type="date" name="start" value="${esc(e.start)}" required></label>
+        <label class="field"><span>끝나는 날 <small>(여러 날일 때만)</small></span><input type="date" name="end" value="${esc(e.end || '')}"></label>
+      </div>
+      <label class="field"><span>시간 (선택)</span><input type="time" name="time" value="${esc(e.time || '')}"></label>
+      <div class="field"><span>색</span><div class="swatches">${EV_COLORS.map((n, i) => `<label class="sw"><input type="radio" name="color" value="${i}" ${evc(e) === i ? 'checked' : ''}><span class="c${i}" title="${n}"></span></label>`).join('')}</div></div>
+      <div class="field"><span>여러 날일 때 모양</span><div class="chips">${[['arrow', '↔ 화살표'], ['fill', '▬ 칸']].map(([v, l]) => `<label class="chip-radio"><input type="radio" name="shape" value="${v}" ${(e.shape === 'fill' ? 'fill' : 'arrow') === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+      <div class="row end">
+        ${id ? `<button type="button" class="btn ghost danger" data-act="ev-del" data-id="${id}" style="margin-right:auto">삭제</button>` : ''}
+        <button type="button" class="btn ghost" data-close>취소</button><button class="btn primary">저장</button>
+      </div>
+    </form>`;
+    openDlg(dlg);
+    if (!id) dlg.querySelector('[name=title]').focus(); // 누른 순간에 커서를 넣어야 아이폰에서 키보드가 뜸
+  }
+
   /* ---------- ✅ 할 일: 오늘 날짜에 할 일만 (위에 이번 달 목표 1개 · 이번 주 목표 3개) ---------- */
   // 오늘 할 일 = 오늘 하기로 넣은 일(day) + 마감이 오늘인 일
   const isTodayTask = (x, t = today()) => x.day === t || x.due === t;
@@ -676,6 +790,7 @@
     const late = open.filter((x) => isLateTask(x, t)).sort((a, b) => (a.day || a.due).localeCompare(b.day || b.due));
     const rest = open.filter((x) => !isTodayTask(x, t) && !isLateTask(x, t)).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
     const doneToday = state.tasks.filter((x) => x.done && x.doneDate === t);
+    const todayEvents = state.events.filter((e) => e.start <= t && evEnd(e) >= t).sort(evSort);
     const toToday = (x) => `<button type="button" class="btn sm" data-act="task-today" data-id="${x.id}">☀️ 오늘로</button>`;
     // 마감이 오늘인 일은 마감을 바꿔야 빠지므로 '빼기'는 오늘로 넣은 일에만
     const unToday = (x) => (x.day === t && x.due !== t ? `<button type="button" class="btn sm ghost" data-act="task-unday" data-id="${x.id}" title="오늘 할 일에서 빼기">빼기</button>` : ' ');
@@ -690,6 +805,11 @@
           ${[0, 1, 2].map((i) => `<div class="fg-week"><b>${i + 1}</b><textarea class="grow-text fg-input" rows="1" data-bind="vision.week.items.${i}" placeholder="이번 주 목표 ${i + 1}" aria-label="이번 주 목표 ${i + 1}">${esc(v.week.items[i] || '')}</textarea></div>`).join('')}
         </div>
       </section>
+
+      ${todayEvents.length ? `<section class="card">
+        <div class="card-head"><h2>📅 오늘 일정</h2><button class="btn sm ghost" data-act="go" data-to="cal">달력 보기</button></div>
+        ${todayEvents.map((e) => `<div class="ev-today"><i class="ev-dot c${evc(e)}"></i><span class="grow">${esc(e.title)}</span><span class="muted small">${evEnd(e) > e.start ? `~${shortDate(evEnd(e))}` : (e.time || '')}</span></div>`).join('')}
+      </section>` : ''}
 
       <section class="card">
         <div class="card-head"><h2>☀️ ${shortDate(t)} 할 일</h2><span class="muted">${todays.length ? `${todays.length}개 남음` : ''}</span></div>
@@ -1136,7 +1256,7 @@
   }
 
   /* ---------- 렌더 ---------- */
-  const TABS = { today: renderToday, todo: renderTodo, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
+  const TABS = { today: renderToday, todo: renderTodo, cal: renderCal, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
   let tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : 'today';
 
   // 화면을 그리는 도중 입력칸이 사라지며 생기는 blur/change로 다시 그리기가 겹치지 않게 함
@@ -1249,6 +1369,23 @@
     const id = el.dataset.id;
     switch (el.dataset.act) {
       case 'go': return go(el.dataset.to);
+      case 'cal-prev': case 'cal-next': {
+        const [cy, cm] = calMonth.split('-').map(Number);
+        calMonth = ymd(new Date(cy, cm - 1 + (el.dataset.act === 'cal-next' ? 1 : -1), 1)).slice(0, 7);
+        calSel = calMonth === monthKey(today()) ? today() : `${calMonth}-01`;
+        render(); return;
+      }
+      case 'cal-today': calMonth = monthKey(today()); calSel = today(); render(); return;
+      case 'cal-day': calSel = el.dataset.d; render(); return;
+      case 'ev-add': openEvent(null, el.dataset.d || calSel); return;
+      case 'ev-edit': openEvent(id); return;
+      case 'ev-del': {
+        // 창이 하나뿐이라 확인창 대신 버튼을 한 번 더 누르게 함
+        if (el.dataset.armed !== '1') { el.dataset.armed = '1'; el.textContent = '한 번 더 누르면 지워져요'; return; }
+        state.events = state.events.filter((x) => x.id !== id);
+        closeDlg();
+        break;
+      }
       case 'dismiss-onboard': state.onboardDismissed = true; break;
       case 'toggle-task': {
         const x = state.tasks.find((t) => t.id === id);
@@ -1787,6 +1924,19 @@
       state.vision.goals.push({ id: uid(), text, done: false });
       save();
       render('[name=goal]');
+      return;
+    }
+    if (kind === 'event') {
+      const title = val('title'), start = val('start');
+      let end = val('end');
+      if (!title || !start) { toast('제목과 시작일을 적어 주세요'); return; }
+      if (end && end < start) { toast('끝나는 날이 시작일보다 빨라요'); return; }
+      if (end === start) end = '';
+      const rec = { title, start, end, time: end ? '' : val('time'), color: Number(val('color')) || 0, shape: val('shape') === 'fill' ? 'fill' : 'arrow' };
+      if (f.dataset.id && findEv(f.dataset.id)) Object.assign(findEv(f.dataset.id), rec);
+      else state.events.push({ id: uid(), ...rec, created: today() });
+      calMonth = monthKey(start); calSel = start;
+      closeDlg(); save(); render();
       return;
     }
     if (kind === 'exp') {
