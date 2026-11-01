@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.6'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.8'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -160,6 +160,26 @@
   })();
   const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* 저장소를 못 쓰는 환경 */ } };
   const syncReady = () => !!(sync.repo && sync.token);
+  const normRepo = (v) => String(v || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  // 아이폰은 체크박스·버튼을 눌러도 입력칸을 '벗어난 것'으로 안 쳐서 change가 안 옴 → 누르는 순간 칸에 적힌 값을 직접 읽어 저장
+  function syncApplyInputs() {
+    const r = $('#sync-repo'), t = $('#sync-token');
+    let changed = false;
+    if (r && normRepo(r.value) !== sync.repo) { sync.repo = normRepo(r.value); changed = true; }
+    if (t && t.value.trim() && t.value.trim() !== sync.token) { sync.token = t.value.trim(); changed = true; }
+    if (changed) { sync.lastHash = null; sync.sha = undefined; sync.lastErr = ''; }
+    saveSync();
+  }
+  // 화면을 다시 그리지 않고 설정 카드만 맞춤 (다시 그리면 누르던 버튼이 사라져서 눌림이 씹힘)
+  function refreshSyncUi(clearToken) {
+    const tok = $('#sync-token'), repo = $('#sync-repo'), on = $('#sync-on'), clr = $('#sync-clear'), st = $('#sync-status'), hint = $('#sync-on-hint');
+    if (tok) { if (clearToken) tok.value = ''; tok.placeholder = sync.token ? '저장됨 ●●●● (바꾸려면 새로 붙여넣기)' : 'github_pat_…'; }
+    if (repo && document.activeElement !== repo) repo.value = sync.repo;
+    if (on) on.checked = !!sync.on;
+    if (hint) hint.hidden = !!(sync.on || sync.lastOk);
+    if (clr) clr.hidden = !(sync.token || sync.repo);
+    if (st) st.textContent = syncStatus();
+  }
   let syncTimer = null, syncBusy = false, syncAgain = false;
   const hashOf = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return h; };
   const toB64 = (str) => { // 한글이 깨지지 않게 UTF-8로 바꾼 뒤 base64
@@ -1299,12 +1319,12 @@
       <section class="card" id="assist-set">
         <div class="card-head"><h2>🤖 비서 연결</h2></div>
         <p class="muted small">일정과 할 일을 <b>나만 보는 비공개 GitHub 저장소</b>에 자동으로 올려요. 비서(Claude)가 그걸 읽고 아침 브리핑 같은 걸 보내요. 토큰은 <b>이 폰에만</b> 저장되고, 백업이나 기록 복사에는 들어가지 않아요.</p>
-        <label class="field"><span>비공개 저장소 (예: 내아이디/life-dashboard-data)</span><input data-sync="repo" value="${esc(sync.repo)}" placeholder="아이디/저장소이름" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-        <label class="field"><span>토큰</span><input class="mask" data-sync="token" value="" placeholder="${sync.token ? '저장됨 ●●●● (바꾸려면 새로 붙여넣기)' : 'github_pat_…'}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-        <label class="fl" style="margin-top:6px"><input type="checkbox" data-sync-on ${sync.on ? 'checked' : ''}><span>고칠 때마다 자동으로 올리기</span></label>
+        <label class="field"><span>비공개 저장소 (예: 내아이디/life-dashboard-data)</span><input id="sync-repo" data-sync="repo" value="${esc(sync.repo)}" placeholder="아이디/저장소이름" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>토큰</span><input id="sync-token" class="mask" data-sync="token" value="" placeholder="${sync.token ? '저장됨 ●●●● (바꾸려면 새로 붙여넣기)' : 'github_pat_…'}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+        <label class="fl" style="margin-top:6px"><input id="sync-on" type="checkbox" data-sync-on ${sync.on ? 'checked' : ''}><span>고칠 때마다 자동으로 올리기<small class="muted" id="sync-on-hint" ${sync.on || sync.lastOk ? 'hidden' : ''}><br>[지금 올리기]가 성공하면 저절로 켜져요.</small></span></label>
         <div class="row" style="margin-top:6px">
           <button class="btn primary" data-act="sync-now">지금 올리기 · 연결 확인</button>
-          ${sync.token || sync.repo ? '<button class="btn ghost danger" data-act="sync-clear">연결 끊기</button>' : ''}
+          <button class="btn ghost danger" id="sync-clear" data-act="sync-clear" ${sync.token || sync.repo ? '' : 'hidden'}>연결 끊기</button>
         </div>
         <p class="hint" id="sync-status">${esc(syncStatus())}</p>
         <details style="margin-top:8px"><summary class="muted small">저장소와 토큰 만드는 법</summary>
@@ -1692,7 +1712,8 @@
       }
       case 'go-transfer': go('settings'); $('#transfer')?.scrollIntoView({ block: 'start' }); return;
       case 'sync-now': {
-        if (!sync.repo || !sync.token) { toast('저장소와 토큰을 먼저 넣어 주세요'); return; }
+        syncApplyInputs();
+        if (!syncReady()) { refreshSyncUi(); toast('저장소와 토큰을 먼저 넣어 주세요'); return; }
         el.disabled = true; el.textContent = '올리는 중…';
         const r = await pushSync(true);
         if (r.ok && !sync.on) { sync.on = true; saveSync(); }
@@ -1818,16 +1839,15 @@
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.cal) { state.calView[el.dataset.cal] = el.checked; save(); render(); return; }
     if (el.dataset.sync) {
-      const v = el.value.trim();
-      if (el.dataset.sync === 'repo') sync.repo = v.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
-      else if (v) sync.token = v;
-      sync.lastHash = null; sync.sha = undefined; sync.lastErr = '';
-      saveSync(); render(); toast('저장했어요');
+      const had = el.value.trim();
+      syncApplyInputs(); refreshSyncUi(true);
+      if (had) toast('저장했어요');
       return;
     }
     if (el.dataset.syncOn !== undefined) {
-      if (el.checked && !syncReady()) { toast('저장소와 토큰을 먼저 넣어 주세요'); render(); return; }
-      sync.on = el.checked; saveSync(); render();
+      syncApplyInputs();
+      if (el.checked && !syncReady()) { el.checked = false; refreshSyncUi(); toast('저장소와 토큰을 먼저 넣어 주세요'); return; }
+      sync.on = el.checked; saveSync(); refreshSyncUi(true);
       if (sync.on) queueSync();
       return;
     }
@@ -1926,6 +1946,7 @@
     const el = e.target;
     // 한글 조합 중에 칸 내용을 건드리면 아이폰에서 글자가 안 써지므로, 줄바꿈이 들어온 경우에만 고침
     if (el.classList.contains('grow-text')) { if (!e.isComposing && el.value.includes('\n')) el.value = el.value.replace(/\n/g, ' '); autoGrow(el); }
+    if (el.dataset.sync) { syncApplyInputs(); const st = $('#sync-status'); if (st) st.textContent = syncStatus(); return; } // 적는 대로 바로 저장
     if (el.dataset.calName !== undefined) { state.calView.colorNames[el.dataset.calName] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); return; }
     if (el.dataset.exp) {
       const x = findExp(el.dataset.exp);
