@@ -766,7 +766,7 @@
         <button class="btn sm ${calFilterOpen ? 'primary' : ''}" data-act="cal-filter" aria-expanded="${calFilterOpen}">표시${filtered ? ' •' : ''}</button>
       </div>
       ${calFilterOpen ? `<section class="card cal-filter">
-        <label class="fl"><input type="checkbox" data-cal="holidays" ${cv.holidays ? 'checked' : ''}><span>🎌 공휴일</span></label>
+        <label class="fl"><input type="checkbox" data-cal="holidays" ${cv.holidays ? 'checked' : ''}><span>🎉 공휴일</span></label>
         <label class="fl"><input type="checkbox" data-cal="due" ${cv.due ? 'checked' : ''}><span>📌 할 일 마감 (날짜 옆 빨간 점)</span></label>
         <p class="fl-h">일정 · 색깔별 (이름을 붙이면 종류처럼 쓸 수 있어요)</p>
         ${EV_COLORS.map((n, i) => `<div class="fl fl-color"><input type="checkbox" data-cal-color="${i}" ${colorHidden(i) ? '' : 'checked'} aria-label="${n} 일정 보기"><i class="ev-dot c${i}"></i><input class="fl-name" data-cal-name="${i}" value="${esc(colorName(i))}" placeholder="${n}" maxlength="12" autocomplete="off" aria-label="${n} 이름"></div>`).join('')}
@@ -777,7 +777,7 @@
       </div>
       <section class="card">
         <div class="card-head"><h2>${shortDate(calSel)}${calSel === t ? ' · 오늘' : ''}</h2><button class="btn sm primary" data-act="ev-add" data-d="${calSel}">+ 일정 추가</button></div>
-        ${hol ? `<p class="cal-hol">🎌 ${esc(hol)}</p>` : ''}
+        ${hol ? `<p class="cal-hol">🎉 ${esc(hol)}</p>` : ''}
         ${day.length ? day.map(evRow).join('') : '<p class="muted small day-none">일정이 없어요</p>'}
         <div class="day-tasks">
           <div class="card-head"><h3>✅ ${who} 할 일</h3><span class="muted">${openLeft ? `${openLeft}개 남음` : ''}</span></div>
