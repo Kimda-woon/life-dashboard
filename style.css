@@ -603,3 +603,10 @@ body.typing .tabs { display: none; }
 .sw span { display: block; width: 30px; height: 30px; border-radius: 50%; background: var(--bg); border: 3px solid transparent; box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
 .sw input:checked + span { border-color: var(--ink); }
 .sw input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: 2px; }
+.cd { position: relative; }
+.cd-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--due); opacity: .55; }
+.cd-dot.late { opacity: 1; }
+.due-h { margin: 12px 0 2px; font-size: 13px; color: var(--muted); }
+.due-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.due-row input { width: 22px; height: 22px; accent-color: var(--good); margin: 0; flex: none; }
+.due-row.done .grow { text-decoration: line-through; color: var(--muted); }

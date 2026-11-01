@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.1'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -706,8 +706,9 @@
     const rows = `${days.some((d) => HOLIDAYS[d]) ? 36 : 24}px${A ? ` repeat(${A}, 18px)` : ''}${lanes.length ? ` repeat(${lanes.length}, 25px)` : ''} minmax(4px, 1fr)`;
     const dayBtns = days.map((d, i) => {
       const h = HOLIDAYS[d];
+      const due = state.tasks.filter((x) => !x.done && x.due === d).length; // 마감이 이 날인 안 끝낸 할 일
       const cls = ['cd', d.slice(0, 7) !== mk && 'out', (i === 6 || h) && 'red', d === t && 'today', d === calSel && 'sel'].filter(Boolean).join(' ');
-      return `<button type="button" class="${cls}" data-act="cal-day" data-d="${d}" style="grid-column:${i + 1};grid-row:1/-1" aria-label="${shortDate(d)}${h ? ' ' + esc(h) : ''}"><span class="cd-n">${Number(d.slice(8))}</span>${h ? `<span class="cd-h">${esc(h)}</span>` : ''}</button>`;
+      return `<button type="button" class="${cls}" data-act="cal-day" data-d="${d}" style="grid-column:${i + 1};grid-row:1/-1" aria-label="${shortDate(d)}${h ? ' ' + esc(h) : ''}${due ? ` 마감 할 일 ${due}개` : ''}"><span class="cd-n">${Number(d.slice(8))}</span>${h ? `<span class="cd-h">${esc(h)}</span>` : ''}${due ? `<i class="cd-dot ${d < t ? 'late' : ''}"></i>` : ''}</button>`;
     }).join('');
     const chips = cols.map(({ show, more }, i) => show.map((e, k) => `<span class="cchip c${evc(e)}" style="grid-column:${i + 1};grid-row:${2 + k}">${esc(e.title)}</span>`).join('')
       + (more ? `<span class="cmore" style="grid-column:${i + 1};grid-row:${2 + show.length}">+${more}</span>` : '')).join('');
@@ -728,6 +729,7 @@
     for (let ws = weekStart(`${calMonth}-01`); ws <= last; ws = addDays(ws, 7)) weeks.push(ws);
     const day = state.events.filter((e) => e.start <= calSel && evEnd(e) >= calSel).sort(evSort);
     const hol = HOLIDAYS[calSel];
+    const dueTasks = state.tasks.filter((x) => x.due === calSel).sort((a, b) => a.done - b.done);
     return `<div class="stack">
       <div class="cal-head">
         <button class="btn sm ghost" data-act="cal-prev" aria-label="이전 달">‹</button>
@@ -742,7 +744,8 @@
       <section class="card">
         <div class="card-head"><h2>${shortDate(calSel)}${calSel === t ? ' · 오늘' : ''}</h2><button class="btn sm primary" data-act="ev-add" data-d="${calSel}">+ 일정 추가</button></div>
         ${hol ? `<p class="cal-hol">🎌 ${esc(hol)}</p>` : ''}
-        ${day.length ? day.map(evRow).join('') : '<p class="empty">이 날 일정이 없어요.<br>날짜를 누르면 그날 일정이 여기 보여요.</p>'}
+        ${day.length ? day.map(evRow).join('') : (dueTasks.length ? '' : '<p class="empty">이 날 일정이 없어요.<br>날짜를 누르면 그날 일정이 여기 보여요.</p>')}
+        ${dueTasks.length ? `<h3 class="due-h">✅ 마감 할 일</h3>${dueTasks.map((x) => `<label class="due-row ${x.done ? 'done' : ''}"><input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료"><span class="grow">${esc(x.text)}</span><span class="muted small">${esc(catOf(x.cat).icon)}</span></label>`).join('')}` : ''}
       </section>
     </div>`;
   }
