@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.8'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.9'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -160,7 +160,11 @@
   })();
   const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* 저장소를 못 쓰는 환경 */ } };
   const syncReady = () => !!(sync.repo && sync.token);
-  const normRepo = (v) => String(v || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  const normRepo = (v) => { // 'github.com/아이디/이름/…' 처럼 길게 붙여 넣어도 '아이디/이름'만 뽑음
+    const t = String(v || '').trim();
+    const m = t.match(/^(?:(?:https?:\/\/)?(?:www\.)?github\.com\/)?@?([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:[/?#].*)?$/i);
+    return m ? `${m[1]}/${m[2]}` : t;
+  };
   // 아이폰은 체크박스·버튼을 눌러도 입력칸을 '벗어난 것'으로 안 쳐서 change가 안 옴 → 누르는 순간 칸에 적힌 값을 직접 읽어 저장
   function syncApplyInputs() {
     const r = $('#sync-repo'), t = $('#sync-token');
@@ -197,6 +201,16 @@
     403: '권한이 없어요. 토큰에 이 저장소의 Contents 읽기·쓰기 권한이 있는지 확인해 주세요',
     404: '저장소를 못 찾았어요. 이름과, 토큰의 저장소 선택을 확인해 주세요',
   }[code] || `GitHub 오류 (${code})`);
+  // 404는 '저장소가 없음'과 '토큰이 그 저장소를 못 봄'이 똑같이 오므로, 토큰 주인과 저장소가 보이는지 따로 물어서 원인을 좁혀 줌
+  async function syncDiagnose() {
+    const get = (url) => fetch(`https://api.github.com${url}`, { headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', Authorization: `Bearer ${sync.token}` } });
+    let login = '', seen = false;
+    try { const u = await get('/user'); if (u.ok) login = (await u.json()).login || ''; } catch (e) { /* 무시 */ }
+    try { seen = (await get(`/repos/${sync.repo}`)).ok; } catch (e) { /* 무시 */ }
+    if (seen) return '저장소는 보이는데 쓰기가 막혔어요. 토큰의 Contents를 Read and write로 해 주세요. (저장소가 완전히 비어 있으면 README를 넣어 주세요)';
+    const owner = sync.repo.split('/')[0];
+    return `저장소 "${sync.repo}"가 이 토큰에 안 보여요.${login ? ` 토큰 주인은 "${login}"${login.toLowerCase() === owner.toLowerCase() ? '예요.' : '인데, 저장소 아이디와 달라요.'}` : ''} ① 저장소 이름이 맞는지 ② 토큰을 만들 때 Repository access에서 "Only select repositories"로 이 저장소를 골랐는지 확인해 주세요. (기본값은 공개 저장소만이라 비공개 저장소는 안 보여요)`;
+  }
   const syncWhen = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   function syncStatus() {
     if (!syncReady()) return '아직 연결 안 됐어요. 저장소와 토큰을 넣고 [지금 올리기]를 눌러 주세요.';
@@ -220,7 +234,7 @@
         const g = await ghFetch(SYNC_FILE);
         r = await put(g.ok ? (await g.json()).sha : undefined);
       }
-      if (!r.ok) throw new Error(syncWhy(r.status));
+      if (!r.ok) throw new Error(r.status === 404 ? await syncDiagnose() : syncWhy(r.status));
       sync.sha = (await r.json()).content.sha;
       sync.lastHash = h; sync.lastOk = new Date().toISOString(); sync.lastErr = '';
       res = { ok: true, msg: '비서 저장소에 올렸어요' };
