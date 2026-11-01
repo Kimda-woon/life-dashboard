@@ -129,7 +129,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .icon-btn:hover { background: var(--soft); }
 
 /* inputs */
-input[type=text], input:not([type]), input[type=date], input[type=number], textarea, select {
+input[type=text], input:not([type]), input[type=date], input[type=time], input[type=number], textarea, select {
   width: 100%; border: 1px solid var(--line); background: var(--bg);
   border-radius: 12px; padding: 10px 12px; min-height: 44px; outline: none;
 }
@@ -615,3 +615,11 @@ body.typing .tabs { display: none; }
 .day-none { padding: 6px 0; }
 .day-tasks { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .day-tasks h3 { font-size: 15px; }
+/* 일정 창: 아이폰 날짜·시간 칸이 칸 밖으로 삐져나오거나 가운데로 쏠리지 않게 */
+[hidden] { display: none !important; }
+input[type=date], input[type=time] { -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%; text-align: left; }
+input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-and-time-value { text-align: left; min-height: 1.3em; }
+.ev-dates { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.ev-dates .field { min-width: 0; }
+.ev-time .fl { padding: 2px 0 8px; }
+.ev-time input[type=time] { margin-top: 2px; }

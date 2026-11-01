@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.4'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -814,11 +814,15 @@
     dlg.innerHTML = `<form class="dlg" data-form="event" data-id="${id || ''}">
       <h2>${id ? '일정 고치기' : '📅 일정 추가'}</h2>
       <label class="field"><span>제목</span><input name="title" value="${esc(e.title)}" placeholder="예: 대본 수정" autocomplete="off" required></label>
-      <div class="grid2">
+      <div class="grid2 ev-dates">
         <label class="field"><span>시작</span><input type="date" name="start" value="${esc(e.start)}" required></label>
-        <label class="field"><span>끝나는 날 <small>(여러 날일 때만)</small></span><input type="date" name="end" value="${esc(e.end || '')}"></label>
+        <label class="field"><span>끝나는 날</span><input type="date" name="end" value="${esc(e.end || '')}"></label>
       </div>
-      <label class="field"><span>시간 (선택)</span><input type="time" name="time" value="${esc(e.time || '')}"></label>
+      <p class="hint">끝나는 날은 여러 날일 때만 넣어요. 비워 두면 하루짜리예요.</p>
+      <div class="field ev-time">
+        <label class="fl"><input type="checkbox" name="hasTime" ${e.time ? 'checked' : ''}><span>시간 정하기 <small class="muted">(하루짜리만)</small></span></label>
+        <input type="time" name="time" value="${esc(e.time || '09:00')}" ${e.time ? '' : 'hidden'} aria-label="시간">
+      </div>
       <div class="field"><span>색</span><div class="swatches">${EV_COLORS.map((n, i) => `<label class="sw"><input type="radio" name="color" value="${i}" ${evc(e) === i ? 'checked' : ''}><span class="c${i}" title="${esc(colorName(i) || n)}"></span></label>`).join('')}</div></div>
       <div class="field"><span>여러 날일 때 모양</span><div class="chips">${[['arrow', '↔ 화살표'], ['fill', '▬ 칸']].map(([v, l]) => `<label class="chip-radio"><input type="radio" name="shape" value="${v}" ${(e.shape === 'fill' ? 'fill' : 'arrow') === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="row end">
@@ -1689,6 +1693,7 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.cal) { state.calView[el.dataset.cal] = el.checked; save(); render(); return; }
+    if (el.name === 'hasTime') { const ti = el.form.elements.time; ti.hidden = !el.checked; if (el.checked && !ti.value) ti.value = '09:00'; return; }
     if (el.dataset.calColor !== undefined) {
       const i = Number(el.dataset.calColor);
       state.calView.hiddenColors = state.calView.hiddenColors.filter((x) => x !== i);
@@ -1928,7 +1933,7 @@
       if (!title || !start) { toast('제목과 시작일을 적어 주세요'); return; }
       if (end && end < start) { toast('끝나는 날이 시작일보다 빨라요'); return; }
       if (end === start) end = '';
-      const rec = { title, start, end, time: end ? '' : val('time'), color: Number(val('color')) || 0, shape: val('shape') === 'fill' ? 'fill' : 'arrow' };
+      const rec = { title, start, end, time: end || !f.elements.hasTime?.checked ? '' : val('time'), color: Number(val('color')) || 0, shape: val('shape') === 'fill' ? 'fill' : 'arrow' };
       if (f.dataset.id && findEv(f.dataset.id)) Object.assign(findEv(f.dataset.id), rec);
       else state.events.push({ id: uid(), ...rec, created: today() });
       state.calView.hiddenColors = state.calView.hiddenColors.filter((x) => x !== rec.color); // 숨긴 색으로 넣으면 다시 보이게
