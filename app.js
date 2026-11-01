@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.4'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.5'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -698,35 +698,43 @@
   function calWeek(ws, mk, t) {
     const days = weekDays(ws), we = days[6];
     const evs = state.events.filter((e) => evVisible(e) && e.start <= we && evEnd(e) >= ws);
-    const singles = evs.filter((e) => evEnd(e) === e.start).sort(evSort);
-    const multis = evs.filter((e) => evEnd(e) > e.start).sort((a, b) => a.start.localeCompare(b.start) || evEnd(b).localeCompare(evEnd(a)));
-    const hidden = Array(7).fill(0); // 자리가 모자라 못 그린 일정 수
-    const lanes = [];
-    multis.forEach((e) => {
-      const c0 = Math.max(0, daysBetween(ws, e.start)), c1 = Math.min(6, daysBetween(ws, evEnd(e)));
-      let L = lanes.findIndex((lane) => lane.every((b) => b.c1 < c0 || b.c0 > c1));
-      if (L < 0) L = lanes.length;
-      if (L >= 3) { for (let c = c0; c <= c1; c++) hidden[c]++; return; }
-      (lanes[L] = lanes[L] || []).push({ e, c0, c1 });
+    // 하루짜리 칸과 여러 날 일정을 한 줄(레인)에 위에서부터 빈틈없이 채움: 여러 날 칸 → 하루짜리 → 화살표 순으로 자리를 잡음
+    const span = (e) => [Math.max(0, daysBetween(ws, e.start)), Math.min(6, daysBetween(ws, evEnd(e)))];
+    const byLen = (a, b) => a.start.localeCompare(b.start) || evEnd(b).localeCompare(evEnd(a));
+    const multi = (e) => evEnd(e) > e.start;
+    const order = [
+      ...evs.filter((e) => multi(e) && e.shape === 'fill').sort(byLen).map((e) => [e, 'fill']),
+      ...evs.filter((e) => !multi(e)).sort(evSort).map((e) => [e, 'chip']),
+      ...evs.filter((e) => multi(e) && e.shape !== 'fill').sort(byLen).map((e) => [e, 'arrow']),
+    ];
+    const MAXL = 3; // 한 주에 보여 줄 줄 수. 넘치는 건 날짜마다 +N으로
+    const occ = [];
+    const placed = [];
+    const hidden = Array(7).fill(0);
+    order.forEach(([e, kind]) => {
+      const [c0, c1] = span(e);
+      let L = 0;
+      while (occ[L] && occ[L].slice(c0, c1 + 1).some(Boolean)) L++;
+      occ[L] = occ[L] || Array(7).fill(false);
+      for (let c = c0; c <= c1; c++) occ[L][c] = true;
+      if (L >= MAXL) { for (let c = c0; c <= c1; c++) hidden[c]++; return; }
+      placed.push({ e, kind, c0, c1, L });
     });
-    const cols = days.map((d, i) => {
-      const list = singles.filter((e) => e.start === d);
-      let show = list, more = hidden[i];
-      if (list.length + (more ? 1 : 0) > 3) { show = list.slice(0, 2); more = list.length - 2 + hidden[i]; }
-      return { show, more };
-    });
-    const A = Math.max(0, ...cols.map((c) => c.show.length + (c.more ? 1 : 0)));
-    const rows = `${days.some((d) => holOf(d)) ? 36 : 24}px${A ? ` repeat(${A}, 18px)` : ''}${lanes.length ? ` repeat(${lanes.length}, 25px)` : ''} minmax(4px, 1fr)`;
+    const laneCount = placed.length ? Math.max(...placed.map((q) => q.L)) + 1 : 0;
+    const heights = Array.from({ length: laneCount }, (_, L) => (placed.some((q) => q.L === L && q.kind === 'arrow') ? 25 : 18));
+    const moreRow = hidden.some(Boolean);
+    const rows = [`${days.some((d) => holOf(d)) ? 36 : 24}px`, ...heights.map((h) => `${h}px`), ...(moreRow ? ['17px'] : []), 'minmax(4px, 1fr)'].join(' ');
     const dayBtns = days.map((d, i) => {
       const h = holOf(d);
       const due = state.calView.due ? state.tasks.filter((x) => !x.done && x.due === d).length : 0; // 마감이 이 날인 안 끝낸 할 일
       const cls = ['cd', d.slice(0, 7) !== mk && 'out', (i === 6 || h) && 'red', d === t && 'today', d === calSel && 'sel'].filter(Boolean).join(' ');
       return `<button type="button" class="${cls}" data-act="cal-day" data-d="${d}" style="grid-column:${i + 1};grid-row:1/-1" aria-label="${shortDate(d)}${h ? ' ' + esc(h) : ''}${due ? ` 마감 할 일 ${due}개` : ''}"><span class="cd-n">${Number(d.slice(8))}</span>${h ? `<span class="cd-h">${esc(h)}</span>` : ''}${due ? `<i class="cd-dot ${d < t ? 'late' : ''}"></i>` : ''}</button>`;
     }).join('');
-    const chips = cols.map(({ show, more }, i) => show.map((e, k) => `<span class="cchip c${evc(e)}" style="grid-column:${i + 1};grid-row:${2 + k}">${esc(e.title)}</span>`).join('')
-      + (more ? `<span class="cmore" style="grid-column:${i + 1};grid-row:${2 + show.length}">+${more}</span>` : '')).join('');
-    const bars = lanes.map((lane, L) => lane.map(({ e, c0, c1 }) => `<div class="cbar c${evc(e)} ${e.shape === 'fill' ? 'fill' : ''} ${e.start < ws ? 'ol' : ''} ${evEnd(e) > we ? 'or' : ''}" style="grid-column:${c0 + 1}/${c1 + 2};grid-row:${2 + A + L}"><span class="cb-line"></span><span class="cb-t">${esc(e.title)}</span></div>`).join('')).join('');
-    return `<div class="cweek" style="grid-template-rows:${rows}">${dayBtns}${chips}${bars}</div>`;
+    const items = placed.map(({ e, kind, c0, c1, L }) => (kind === 'chip'
+      ? `<span class="cchip c${evc(e)}" style="grid-column:${c0 + 1};grid-row:${2 + L}">${esc(e.title)}</span>`
+      : `<div class="cbar c${evc(e)} ${kind === 'fill' ? 'fill' : ''} ${e.start < ws ? 'ol' : ''} ${evEnd(e) > we ? 'or' : ''}" style="grid-column:${c0 + 1}/${c1 + 2};grid-row:${2 + L}"><span class="cb-line"></span><span class="cb-t">${esc(e.title)}</span></div>`)).join('');
+    const mores = hidden.map((n, i) => (n ? `<span class="cmore" style="grid-column:${i + 1};grid-row:${2 + MAXL}">+${n}</span>` : '')).join('');
+    return `<div class="cweek" style="grid-template-rows:${rows}">${dayBtns}${items}${mores}</div>`;
   }
 
   const evMeta = (e) => (evEnd(e) > e.start ? `${shortDate(e.start)} ~ ${shortDate(evEnd(e))} · ${daysBetween(e.start, evEnd(e)) + 1}일` : (e.time || '하루 종일'));
