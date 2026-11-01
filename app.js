@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.6'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.7'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -1301,7 +1301,7 @@
         <p class="muted small">일정과 할 일을 <b>나만 보는 비공개 GitHub 저장소</b>에 자동으로 올려요. 비서(Claude)가 그걸 읽고 아침 브리핑 같은 걸 보내요. 토큰은 <b>이 폰에만</b> 저장되고, 백업이나 기록 복사에는 들어가지 않아요.</p>
         <label class="field"><span>비공개 저장소 (예: 내아이디/life-dashboard-data)</span><input data-sync="repo" value="${esc(sync.repo)}" placeholder="아이디/저장소이름" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
         <label class="field"><span>토큰</span><input class="mask" data-sync="token" value="" placeholder="${sync.token ? '저장됨 ●●●● (바꾸려면 새로 붙여넣기)' : 'github_pat_…'}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-        <label class="fl" style="margin-top:6px"><input type="checkbox" data-sync-on ${sync.on ? 'checked' : ''}><span>고칠 때마다 자동으로 올리기</span></label>
+        <label class="fl ${syncReady() ? '' : 'off'}" style="margin-top:6px"><input type="checkbox" data-sync-on ${sync.on ? 'checked' : ''} ${syncReady() ? '' : 'disabled'}><span>고칠 때마다 자동으로 올리기${syncReady() ? '' : '<small class="muted"><br>저장소와 토큰을 넣으면 켤 수 있어요. 아래 [지금 올리기]가 성공하면 저절로 켜져요.</small>'}</span></label>
         <div class="row" style="margin-top:6px">
           <button class="btn primary" data-act="sync-now">지금 올리기 · 연결 확인</button>
           ${sync.token || sync.repo ? '<button class="btn ghost danger" data-act="sync-clear">연결 끊기</button>' : ''}

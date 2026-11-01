@@ -624,3 +624,7 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 .ev-time .fl { padding: 2px 0 8px; }
 .ev-time input[type=time] { margin-top: 2px; }
 .mask { -webkit-text-security: disc; text-security: disc; }
+.fl.off { opacity: .6; cursor: default; }
+.fl small { font-size: 12px; line-height: 1.4; }
+.fl.off { align-items: flex-start; }
+.fl.off input[type=checkbox] { margin-top: 2px; }
