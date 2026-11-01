@@ -78,7 +78,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
   border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
 }
-.tabs-inner { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 4px; }
+.tabs-inner { display: grid; grid-template-columns: repeat(6, 1fr); padding: 0 4px; }
 .tabs button {
   border: 0; background: none; cursor: pointer;
   padding: 8px 2px 10px; font-size: 12px; color: var(--muted);
@@ -578,7 +578,7 @@ body.typing .tabs { display: none; }
 .cd.today .cd-n { background: var(--accent); color: #fff; }
 .cd.sel { background: var(--accent-soft); }
 .cd-h { max-width: 100%; margin-top: 1px; font-size: 8.5px; line-height: 11px; color: var(--due); opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cchip, .cmore, .cbar { pointer-events: none; min-width: 0; }
+.cchip, .cmore, .cbar { position: relative; pointer-events: none; min-width: 0; } /* 날짜 칸(position: relative)보다 위에 그려지도록 */
 .cchip { height: 17px; margin: 1px 1px 0; padding: 0 3px; border-radius: 4px; background: var(--bg); color: var(--fg); font-size: 10.5px; font-weight: 600; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmore { margin: 1px 1px 0; font-size: 10px; line-height: 17px; text-align: center; color: var(--muted); }
 .cbar { position: relative; margin: 0 1px; }
@@ -595,8 +595,6 @@ body.typing .tabs { display: none; }
 .ev-row b { display: block; font-size: 15px; }
 .ev-row small { font-size: 12px; }
 .ev-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 2px var(--ln); }
-.ev-today { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; }
-.card-head + .ev-today { border-top: 0; padding-top: 0; }
 .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
 .sw { position: relative; }
 .sw input { position: absolute; opacity: 0; pointer-events: none; }
@@ -606,7 +604,14 @@ body.typing .tabs { display: none; }
 .cd { position: relative; }
 .cd-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--due); opacity: .55; }
 .cd-dot.late { opacity: 1; }
-.due-h { margin: 12px 0 2px; font-size: 13px; color: var(--muted); }
-.due-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); cursor: pointer; }
-.due-row input { width: 22px; height: 22px; accent-color: var(--good); margin: 0; flex: none; }
-.due-row.done .grow { text-decoration: line-through; color: var(--muted); }
+.cal-head .btn.sm { flex: none; }
+.cal-head h2 { font-size: 19px; }
+.cal-filter { padding: 10px 16px 12px; }
+.fl { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 15px; cursor: pointer; }
+.fl input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--good); margin: 0; flex: none; }
+.fl-h { margin: 8px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.fl-color { cursor: default; padding: 4px 0; }
+.fl-name { flex: 1; min-width: 0; min-height: 36px; padding: 4px 10px; font-size: 14px; }
+.day-none { padding: 6px 0; }
+.day-tasks { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.day-tasks h3 { font-size: 15px; }
