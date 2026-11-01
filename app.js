@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.2'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.3'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -74,6 +74,7 @@
     tasks: [],
     slots: {},
     events: [],                                   // 일정 [{id, title, start, end, time, color, shape}]
+    calView: { holidays: true, due: true, hiddenColors: [], colorNames: {} }, // 달력에 보일 것
     experiments: [],                              // 성장 실험 [{id, think, test, start, end, status:'run'|'done', result, what, learn, change, from, doneDate}]
     vision: {
       y10: '', y5: '', y3: '', y1: '',
@@ -103,6 +104,9 @@
     // 가계부(빚·수입·고정비)는 화면에서 뺐지만, 적어 둔 기록은 지우지 않고 백업에 그대로 남김
     if (!Array.isArray(out.experiments)) out.experiments = [];
     if (!Array.isArray(out.events)) out.events = [];
+    out.calView = { ...base.calView, ...(data.calView || {}) };
+    if (!Array.isArray(out.calView.hiddenColors)) out.calView.hiddenColors = [];
+    if (!out.calView.colorNames || typeof out.calView.colorNames !== 'object') out.calView.colorNames = {};
     // 회사 생활 규칙으로 바뀌기 전 기록: 옛 할 일 종류를 새 종류로 옮김 (보너스 → 드라마, 나머지 → 기타)
     if (!Array.isArray(data.cats) || !data.cats.length) {
       out.cats = DEFAULT_CATS();
@@ -395,10 +399,11 @@
       ${checkMonth() && !checkinFor(checkMonth()) && allPeaks().length ? `<section class="card accent"><div class="row between"><div><h2>📈 ${Number(checkMonth().slice(5))}월 점검할 때예요</h2><p class="muted">한 달 동안 산을 얼마나 올랐는지 1분만.</p></div><button class="btn primary sm" data-act="go-checkin">점검하기</button></div></section>` : ''}
       ${now.getDay() === 0 ? `<section class="card accent"><div class="row between"><div><h2>📝 오늘은 주간 리뷰 날</h2><p class="muted">5분만 써도 다음 주가 달라져요.</p></div><button class="btn primary sm" data-act="go" data-to="review">리뷰하기</button></div></section>` : ''}
 
-      ${(goals.length || weekItems.length || climbingAll().length) ? `<section class="card compass">
+      ${(goals.length || weekItems.length || climbingAll().length || v.month.text) ? `<section class="card compass">
         <div class="card-head"><h2>🧭 나침반</h2><button class="btn sm ghost" data-act="go" data-to="vision">비전 보기</button></div>
         ${goals.length ? `<p class="muted small">1년 목표</p><ul>${goals.map((g) => `<li class="compass-goal">${esc(g.text)}</li>`).join('')}</ul>` : ''}
         ${climbingAll().length ? `<p class="muted small" style="margin-top:8px">⛰️ 지금 오르는 산</p><ul>${climbingAll().map(({ pk, label }) => `<li class="compass-goal"><span class="tag" style="margin:0 6px 0 0">${label}</span>${esc(pk.text)}${curStep(pk) ? ` <span class="muted small">→ ${esc(curStep(pk).text)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+        ${v.month.text ? `<p class="muted small" style="margin-top:8px">📅 ${Number(t.slice(5, 7))}월 목표</p><ul><li class="compass-goal" style="white-space:pre-wrap">${esc(v.month.text)}</li></ul>` : ''}
         ${weekItems.length ? `<p class="muted small" style="margin-top:8px">이번 주 핵심</p><ul>${weekItems.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
       </section>` : ''}
 
@@ -661,7 +666,7 @@
     </div>`;
   }
 
-  /* ---------- 📅 일정 (달력) ---------- */
+  /* ---------- 📅 일정 (달력 + 그날 할 일) ---------- */
   const EV_COLORS = ['노랑', '올리브', '파랑', '청록', '빨강', '보라', '초록'];
   // 공휴일 (대체공휴일 포함). 2026~2027년만 들어 있어요. 그 뒤 해는 직접 일정으로 넣어 주세요.
   const HOLIDAYS = {
@@ -674,17 +679,25 @@
     '2027-07-17': '제헌절', '2027-07-19': '대체공휴일', '2027-08-15': '광복절', '2027-08-16': '대체공휴일', '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴',
     '2027-10-03': '개천절', '2027-10-04': '대체공휴일', '2027-10-09': '한글날', '2027-10-11': '대체공휴일', '2027-12-25': '성탄절', '2027-12-27': '대체공휴일',
   };
-  let calMonth = null; // 보고 있는 달 'YYYY-MM'
-  let calSel = null;   // 고른 날 'YYYY-MM-DD'
+  let calMonth = null;       // 보고 있는 달 'YYYY-MM'
+  let calSel = null;         // 고른 날 'YYYY-MM-DD'
+  let calFilterOpen = false; // '표시' 설정을 펼친 상태
+  let pullOpen = false;      // '다른 할 일에서 가져오기'를 펼친 상태 (다시 그려도 유지)
+  document.addEventListener('toggle', (e) => { if (e.target.dataset?.keep === 'pull') pullOpen = e.target.open; }, true);
   const findEv = (id) => state.events.find((x) => x.id === id);
   const evEnd = (e) => (e.end && e.end > e.start ? e.end : e.start);
   const evc = (e) => Math.min(EV_COLORS.length - 1, Math.max(0, Number(e.color) || 0));
   const evSort = (a, b) => (a.time || '').localeCompare(b.time || '') || a.start.localeCompare(b.start);
+  // 달력에 보일 것 고르기
+  const colorName = (i) => String(state.calView.colorNames[i] || '').trim();
+  const colorHidden = (i) => state.calView.hiddenColors.includes(i);
+  const evVisible = (e) => !colorHidden(evc(e));
+  const holOf = (d) => (state.calView.holidays ? HOLIDAYS[d] || '' : '');
 
   // 한 주(월~일)를 한 줄로: 날짜 칸 위에 하루짜리 일정 칸, 그 아래에 여러 날 일정(화살표 또는 칸)을 겹쳐 그림
   function calWeek(ws, mk, t) {
     const days = weekDays(ws), we = days[6];
-    const evs = state.events.filter((e) => e.start <= we && evEnd(e) >= ws);
+    const evs = state.events.filter((e) => evVisible(e) && e.start <= we && evEnd(e) >= ws);
     const singles = evs.filter((e) => evEnd(e) === e.start).sort(evSort);
     const multis = evs.filter((e) => evEnd(e) > e.start).sort((a, b) => a.start.localeCompare(b.start) || evEnd(b).localeCompare(evEnd(a)));
     const hidden = Array(7).fill(0); // 자리가 모자라 못 그린 일정 수
@@ -703,10 +716,10 @@
       return { show, more };
     });
     const A = Math.max(0, ...cols.map((c) => c.show.length + (c.more ? 1 : 0)));
-    const rows = `${days.some((d) => HOLIDAYS[d]) ? 36 : 24}px${A ? ` repeat(${A}, 18px)` : ''}${lanes.length ? ` repeat(${lanes.length}, 25px)` : ''} minmax(4px, 1fr)`;
+    const rows = `${days.some((d) => holOf(d)) ? 36 : 24}px${A ? ` repeat(${A}, 18px)` : ''}${lanes.length ? ` repeat(${lanes.length}, 25px)` : ''} minmax(4px, 1fr)`;
     const dayBtns = days.map((d, i) => {
-      const h = HOLIDAYS[d];
-      const due = state.tasks.filter((x) => !x.done && x.due === d).length; // 마감이 이 날인 안 끝낸 할 일
+      const h = holOf(d);
+      const due = state.calView.due ? state.tasks.filter((x) => !x.done && x.due === d).length : 0; // 마감이 이 날인 안 끝낸 할 일
       const cls = ['cd', d.slice(0, 7) !== mk && 'out', (i === 6 || h) && 'red', d === t && 'today', d === calSel && 'sel'].filter(Boolean).join(' ');
       return `<button type="button" class="${cls}" data-act="cal-day" data-d="${d}" style="grid-column:${i + 1};grid-row:1/-1" aria-label="${shortDate(d)}${h ? ' ' + esc(h) : ''}${due ? ` 마감 할 일 ${due}개` : ''}"><span class="cd-n">${Number(d.slice(8))}</span>${h ? `<span class="cd-h">${esc(h)}</span>` : ''}${due ? `<i class="cd-dot ${d < t ? 'late' : ''}"></i>` : ''}</button>`;
     }).join('');
@@ -717,26 +730,47 @@
   }
 
   const evMeta = (e) => (evEnd(e) > e.start ? `${shortDate(e.start)} ~ ${shortDate(evEnd(e))} · ${daysBetween(e.start, evEnd(e)) + 1}일` : (e.time || '하루 종일'));
-  const evRow = (e) => `<button type="button" class="ev-row" data-act="ev-edit" data-id="${e.id}"><i class="ev-dot c${evc(e)}"></i><span class="grow"><b>${esc(e.title)}</b><small class="muted">${evMeta(e)}</small></span><span class="muted">›</span></button>`;
+  const evRow = (e) => `<button type="button" class="ev-row" data-act="ev-edit" data-id="${e.id}"><i class="ev-dot c${evc(e)}"></i><span class="grow"><b>${esc(e.title)}</b><small class="muted">${evMeta(e)}${colorName(evc(e)) ? ` · ${esc(colorName(evc(e)))}` : ''}</small></span><span class="muted">›</span></button>`;
 
   function renderCal() {
     const t = today();
     if (!calMonth) calMonth = monthKey(t);
     if (!calSel) calSel = t;
+    if (!catList().some((c) => c.id === newCat)) newCat = catList()[0].id;
+    const cv = state.calView;
     const [y, m] = calMonth.split('-').map(Number);
     const last = ymd(new Date(y, m, 0));
     const weeks = [];
     for (let ws = weekStart(`${calMonth}-01`); ws <= last; ws = addDays(ws, 7)) weeks.push(ws);
-    const day = state.events.filter((e) => e.start <= calSel && evEnd(e) >= calSel).sort(evSort);
-    const hol = HOLIDAYS[calSel];
-    const dueTasks = state.tasks.filter((x) => x.due === calSel).sort((a, b) => a.done - b.done);
+    const day = state.events.filter((e) => evVisible(e) && e.start <= calSel && evEnd(e) >= calSel).sort(evSort);
+    const hol = holOf(calSel);
+    // 고른 날의 할 일 = 그날로 넣은 일 + 마감이 그날인 일 + 그날 끝낸 일
+    const inDay = (x) => x.day === calSel || x.due === calSel;
+    const byDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999');
+    const dayTasks = state.tasks.filter((x) => inDay(x) || (x.done && x.doneDate === calSel)).sort((a, b) => a.done - b.done || byDue(a, b));
+    const openLeft = dayTasks.filter((x) => !x.done).length;
+    // 오늘을 보고 있을 때만: 지난 날로 넣었거나 마감이 지났는데 못 한 일
+    const late = calSel === t ? state.tasks.filter((x) => !x.done && !inDay(x) && ((x.day && x.day < t) || (x.due && x.due < t))).sort(byDue) : [];
+    const rest = state.tasks.filter((x) => !x.done && !inDay(x) && !late.includes(x)).sort(byDue);
+    const who = calSel === t ? '오늘' : '이 날';
+    const toDay = (x) => `<button type="button" class="btn sm" data-act="task-day" data-id="${x.id}">☀️ ${who}로</button>`;
+    // 마감이 그날인 일은 마감 날짜를 바꿔야 빠지므로 '빼기'는 그날로 넣은 일에만
+    const unDay = (x) => (!x.done && x.day === calSel && x.due !== calSel ? `<button type="button" class="btn sm ghost" data-act="task-unday" data-id="${x.id}" title="${who} 할 일에서 빼기">빼기</button>` : ' ');
+    const filtered = !cv.holidays || !cv.due || cv.hiddenColors.length > 0;
     return `<div class="stack">
       <div class="cal-head">
         <button class="btn sm ghost" data-act="cal-prev" aria-label="이전 달">‹</button>
         <h2>${y}년 ${m}월</h2>
         <button class="btn sm ghost" data-act="cal-next" aria-label="다음 달">›</button>
         <button class="btn sm" data-act="cal-today">오늘</button>
+        <button class="btn sm ${calFilterOpen ? 'primary' : ''}" data-act="cal-filter" aria-expanded="${calFilterOpen}">표시${filtered ? ' •' : ''}</button>
       </div>
+      ${calFilterOpen ? `<section class="card cal-filter">
+        <label class="fl"><input type="checkbox" data-cal="holidays" ${cv.holidays ? 'checked' : ''}><span>🎌 공휴일</span></label>
+        <label class="fl"><input type="checkbox" data-cal="due" ${cv.due ? 'checked' : ''}><span>📌 할 일 마감 (날짜 옆 빨간 점)</span></label>
+        <p class="fl-h">일정 · 색깔별 (이름을 붙이면 종류처럼 쓸 수 있어요)</p>
+        ${EV_COLORS.map((n, i) => `<div class="fl fl-color"><input type="checkbox" data-cal-color="${i}" ${colorHidden(i) ? '' : 'checked'} aria-label="${n} 일정 보기"><i class="ev-dot c${i}"></i><input class="fl-name" data-cal-name="${i}" value="${esc(colorName(i))}" placeholder="${n}" maxlength="12" autocomplete="off" aria-label="${n} 이름"></div>`).join('')}
+      </section>` : ''}
       <div class="cal">
         <div class="cal-dow">${['월', '화', '수', '목', '금', '토', '일'].map((n, i) => `<span class="${i === 6 ? 'red' : ''}">${n}</span>`).join('')}</div>
         ${weeks.map((ws) => calWeek(ws, calMonth, t)).join('')}
@@ -744,9 +778,32 @@
       <section class="card">
         <div class="card-head"><h2>${shortDate(calSel)}${calSel === t ? ' · 오늘' : ''}</h2><button class="btn sm primary" data-act="ev-add" data-d="${calSel}">+ 일정 추가</button></div>
         ${hol ? `<p class="cal-hol">🎌 ${esc(hol)}</p>` : ''}
-        ${day.length ? day.map(evRow).join('') : (dueTasks.length ? '' : '<p class="empty">이 날 일정이 없어요.<br>날짜를 누르면 그날 일정이 여기 보여요.</p>')}
-        ${dueTasks.length ? `<h3 class="due-h">✅ 마감 할 일</h3>${dueTasks.map((x) => `<label class="due-row ${x.done ? 'done' : ''}"><input type="checkbox" data-act="toggle-task" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="완료"><span class="grow">${esc(x.text)}</span><span class="muted small">${esc(catOf(x.cat).icon)}</span></label>`).join('')}` : ''}
+        ${day.length ? day.map(evRow).join('') : '<p class="muted small day-none">일정이 없어요</p>'}
+        <div class="day-tasks">
+          <div class="card-head"><h3>✅ ${who} 할 일</h3><span class="muted">${openLeft ? `${openLeft}개 남음` : ''}</span></div>
+          <form class="add-task" data-form="task" data-day="${calSel}">
+            <input name="task" placeholder="${who} 할 일 (예: 은행 서류 내기)" autocomplete="off" id="task-input">
+            <button class="btn primary">추가</button>
+          </form>
+          <div class="chips" style="margin-top:8px" role="radiogroup" aria-label="종류">
+            ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
+          </div>
+          <div style="margin-top:10px">${dayTasks.length ? dayTasks.map((x) => taskRow(x, unDay(x))).join('') : `<p class="empty">${who} 할 일이 아직 없어요.<br>위에 적거나, 아래 다른 할 일에서 가져와요.</p>`}</div>
+        </div>
       </section>
+
+      ${late.length ? `<section class="card late-card">
+        <div class="card-head"><h2>⏰ 지난 날 못 한 일</h2><span class="muted">${late.length}개</span></div>
+        <p class="muted small" style="margin-bottom:6px">오늘 할 거면 ☀️ 오늘로 옮겨요.</p>
+        ${late.map((x) => taskRow(x, toDay(x))).join('')}
+      </section>` : ''}
+
+      ${rest.length ? `<section class="card">
+        <details ${pullOpen ? 'open' : ''} data-keep="pull" class="pull">
+          <summary><b>📥 다른 할 일에서 가져오기</b><span class="muted small">${rest.length}개</span></summary>
+          <div style="margin-top:8px">${rest.map((x) => taskRow(x, toDay(x))).join('')}</div>
+        </details>
+      </section>` : ''}
     </div>`;
   }
 
@@ -762,7 +819,7 @@
         <label class="field"><span>끝나는 날 <small>(여러 날일 때만)</small></span><input type="date" name="end" value="${esc(e.end || '')}"></label>
       </div>
       <label class="field"><span>시간 (선택)</span><input type="time" name="time" value="${esc(e.time || '')}"></label>
-      <div class="field"><span>색</span><div class="swatches">${EV_COLORS.map((n, i) => `<label class="sw"><input type="radio" name="color" value="${i}" ${evc(e) === i ? 'checked' : ''}><span class="c${i}" title="${n}"></span></label>`).join('')}</div></div>
+      <div class="field"><span>색</span><div class="swatches">${EV_COLORS.map((n, i) => `<label class="sw"><input type="radio" name="color" value="${i}" ${evc(e) === i ? 'checked' : ''}><span class="c${i}" title="${esc(colorName(i) || n)}"></span></label>`).join('')}</div></div>
       <div class="field"><span>여러 날일 때 모양</span><div class="chips">${[['arrow', '↔ 화살표'], ['fill', '▬ 칸']].map(([v, l]) => `<label class="chip-radio"><input type="radio" name="shape" value="${v}" ${(e.shape === 'fill' ? 'fill' : 'arrow') === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="row end">
         ${id ? `<button type="button" class="btn ghost danger" data-act="ev-del" data-id="${id}" style="margin-right:auto">삭제</button>` : ''}
@@ -771,76 +828,6 @@
     </form>`;
     openDlg(dlg);
     if (!id) dlg.querySelector('[name=title]').focus(); // 누른 순간에 커서를 넣어야 아이폰에서 키보드가 뜸
-  }
-
-  /* ---------- ✅ 할 일: 오늘 날짜에 할 일만 (위에 이번 달 목표 1개 · 이번 주 목표 3개) ---------- */
-  // 오늘 할 일 = 오늘 하기로 넣은 일(day) + 마감이 오늘인 일
-  const isTodayTask = (x, t = today()) => x.day === t || x.due === t;
-  // 지난 날로 넣었거나 마감이 지났는데 아직 안 한 일
-  const isLateTask = (x, t = today()) => !isTodayTask(x, t) && ((x.day && x.day < t) || (x.due && x.due < t));
-  let pullOpen = false; // '다른 할 일에서 가져오기'를 펼쳐 둔 상태
-  document.addEventListener('toggle', (e) => { if (e.target.dataset?.keep === 'pull') pullOpen = e.target.open; }, true);
-
-  function renderTodo() {
-    const t = today();
-    const v = state.vision;
-    if (!catList().some((c) => c.id === newCat)) newCat = catList()[0].id;
-    const open = state.tasks.filter((x) => !x.done);
-    const todays = open.filter((x) => isTodayTask(x, t));
-    const late = open.filter((x) => isLateTask(x, t)).sort((a, b) => (a.day || a.due).localeCompare(b.day || b.due));
-    const rest = open.filter((x) => !isTodayTask(x, t) && !isLateTask(x, t)).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
-    const doneToday = state.tasks.filter((x) => x.done && x.doneDate === t);
-    const todayEvents = state.events.filter((e) => e.start <= t && evEnd(e) >= t).sort(evSort);
-    const toToday = (x) => `<button type="button" class="btn sm" data-act="task-today" data-id="${x.id}">☀️ 오늘로</button>`;
-    // 마감이 오늘인 일은 마감을 바꿔야 빠지므로 '빼기'는 오늘로 넣은 일에만
-    const unToday = (x) => (x.day === t && x.due !== t ? `<button type="button" class="btn sm ghost" data-act="task-unday" data-id="${x.id}" title="오늘 할 일에서 빼기">빼기</button>` : ' ');
-    return `<div class="stack">
-      <section class="card focus-goals">
-        <div class="fg-block">
-          <span class="fg-label">📅 ${Number(t.slice(5, 7))}월 목표</span>
-          <textarea class="grow-text fg-input fg-month" rows="1" data-bind="vision.month.text" placeholder="이번 달 목표 하나" aria-label="이번 달 목표">${esc(v.month.text)}</textarea>
-        </div>
-        <div class="fg-block">
-          <span class="fg-label">📍 이번 주 목표</span>
-          ${[0, 1, 2].map((i) => `<div class="fg-week"><b>${i + 1}</b><textarea class="grow-text fg-input" rows="1" data-bind="vision.week.items.${i}" placeholder="이번 주 목표 ${i + 1}" aria-label="이번 주 목표 ${i + 1}">${esc(v.week.items[i] || '')}</textarea></div>`).join('')}
-        </div>
-      </section>
-
-      ${todayEvents.length ? `<section class="card">
-        <div class="card-head"><h2>📅 오늘 일정</h2><button class="btn sm ghost" data-act="go" data-to="cal">달력 보기</button></div>
-        ${todayEvents.map((e) => `<div class="ev-today"><i class="ev-dot c${evc(e)}"></i><span class="grow">${esc(e.title)}</span><span class="muted small">${evEnd(e) > e.start ? `~${shortDate(evEnd(e))}` : (e.time || '')}</span></div>`).join('')}
-      </section>` : ''}
-
-      <section class="card">
-        <div class="card-head"><h2>☀️ ${shortDate(t)} 할 일</h2><span class="muted">${todays.length ? `${todays.length}개 남음` : ''}</span></div>
-        <form class="add-task" data-form="task" data-today="1">
-          <input name="task" placeholder="오늘 할 일 (예: 은행 서류 내기)" autocomplete="off" id="task-input">
-          <button class="btn primary">추가</button>
-        </form>
-        <div class="chips" style="margin-top:8px" role="radiogroup" aria-label="종류">
-          ${catList().map((c) => `<label class="chip-radio"><input type="radio" name="cat" value="${esc(c.id)}" data-act="pick-cat" ${newCat === c.id ? 'checked' : ''}><span>${esc(c.icon)} ${esc(c.label)}</span></label>`).join('')}
-        </div>
-        <div style="margin-top:10px">${todays.length ? todays.map((x) => taskRow(x, unToday(x))).join('') : `<p class="empty">${doneToday.length ? '오늘 할 일을 다 끝냈어요 🎉' : '오늘 할 일이 아직 없어요.<br>위에 적거나, 아래 다른 할 일에서 가져와요.'}</p>`}</div>
-      </section>
-
-      ${late.length ? `<section class="card late-card">
-        <div class="card-head"><h2>⏰ 지난 날 못 한 일</h2><span class="muted">${late.length}개</span></div>
-        <p class="muted small" style="margin-bottom:6px">오늘 할 거면 ☀️ 오늘로 옮겨요.</p>
-        ${late.map((x) => taskRow(x, toToday(x))).join('')}
-      </section>` : ''}
-
-      ${rest.length ? `<section class="card">
-        <details ${pullOpen ? 'open' : ''} data-keep="pull" class="pull">
-          <summary><b>📥 다른 할 일에서 가져오기</b><span class="muted small">${rest.length}개</span></summary>
-          <div style="margin-top:8px">${rest.map((x) => taskRow(x, toToday(x))).join('')}</div>
-        </details>
-      </section>` : ''}
-
-      ${doneToday.length ? `<section class="card">
-        <div class="card-head"><h2>✓ 오늘 끝낸 일</h2><span class="muted">${doneToday.length}개</span></div>
-        ${doneToday.map((x) => taskRow(x)).join('')}
-      </section>` : ''}
-    </div>`;
   }
 
   /* ---------- 🌱 성장 루틴: 생각 → 시험 → 결과 → 배움 → 수정 → 다시 생각 ---------- */
@@ -1256,7 +1243,7 @@
   }
 
   /* ---------- 렌더 ---------- */
-  const TABS = { today: renderToday, todo: renderTodo, cal: renderCal, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
+  const TABS = { today: renderToday, cal: renderCal, grow: renderGrow, vision: renderVision, review: renderReview, settings: renderSettings };
   let tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : 'today';
 
   // 화면을 그리는 도중 입력칸이 사라지며 생기는 blur/change로 다시 그리기가 겹치지 않게 함
@@ -1375,6 +1362,7 @@
         calSel = calMonth === monthKey(today()) ? today() : `${calMonth}-01`;
         render(); return;
       }
+      case 'cal-filter': calFilterOpen = !calFilterOpen; render(); return;
       case 'cal-today': calMonth = monthKey(today()); calSel = today(); render(); return;
       case 'cal-day': calSel = el.dataset.d; render(); return;
       case 'ev-add': openEvent(null, el.dataset.d || calSel); return;
@@ -1399,8 +1387,8 @@
         break;
       }
       case 'del-task': state.tasks = state.tasks.filter((t) => t.id !== id); break;
-      case 'task-today': { const x = state.tasks.find((t) => t.id === id); if (!x) return; x.day = today(); toast('☀️ 오늘 할 일로 넣었어요'); break; }
-      case 'task-unday': { const x = state.tasks.find((t) => t.id === id); if (!x) return; x.day = ''; toast('오늘 할 일에서 뺐어요'); break; }
+      case 'task-day': { const x = state.tasks.find((t) => t.id === id); if (!x) return; x.day = calSel || today(); toast(x.day === today() ? '☀️ 오늘 할 일로 넣었어요' : `📅 ${shortDate(x.day)} 할 일로 넣었어요`); break; }
+      case 'task-unday': { const x = state.tasks.find((t) => t.id === id); if (!x) return; x.day = ''; toast('할 일에서 뺐어요'); break; }
       case 'peak-climb': {
         const pk = findPeak(id);
         if (!pk || pk.done) return;
@@ -1700,6 +1688,13 @@
   document.addEventListener('change', (e) => {
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
+    if (el.dataset.cal) { state.calView[el.dataset.cal] = el.checked; save(); render(); return; }
+    if (el.dataset.calColor !== undefined) {
+      const i = Number(el.dataset.calColor);
+      state.calView.hiddenColors = state.calView.hiddenColors.filter((x) => x !== i);
+      if (!el.checked) state.calView.hiddenColors.push(i);
+      save(); render(); return;
+    }
     if (el.dataset.act === 'pick-goal') { newGoal = el.value; return; }
     if (el.dataset.peak && el.dataset.field === 'due') {
       const pk = findPeak(el.dataset.peak);
@@ -1788,6 +1783,7 @@
     const el = e.target;
     // 한글 조합 중에 칸 내용을 건드리면 아이폰에서 글자가 안 써지므로, 줄바꿈이 들어온 경우에만 고침
     if (el.classList.contains('grow-text')) { if (!e.isComposing && el.value.includes('\n')) el.value = el.value.replace(/\n/g, ' '); autoGrow(el); }
+    if (el.dataset.calName !== undefined) { state.calView.colorNames[el.dataset.calName] = el.value; clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); return; }
     if (el.dataset.exp) {
       const x = findExp(el.dataset.exp);
       if (x && el.classList.contains('exp-text')) { x[el.dataset.field] = el.value; autoGrow(el); clearTimeout(bindTimer); bindTimer = setTimeout(save, 300); }
@@ -1854,10 +1850,10 @@
     if (kind === 'task') {
       let text = val('task');
       if (!text) return;
-      let due = newDue;
+      let due = f.dataset.day ? '' : newDue; // 달력에서 넣을 땐 마감 없이 그날 할 일로만
       const parsed = dueFromText(text);
       if (parsed) { text = parsed.text; due = due || parsed.due; }
-      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, stepId: (pendingPeak && pendingStep) || null, done: false, created: today(), doneDate: null, due: due || '', day: f.dataset.today ? today() : '' });
+      state.tasks.push({ id: uid(), text, cat: newCat, goalId: newGoal || null, peakId: pendingPeak || null, stepId: (pendingPeak && pendingStep) || null, done: false, created: today(), doneDate: null, due: due || '', day: f.dataset.day || '' });
       if (due) toast(`📅 ${shortDate(due)}까지로 넣었어요`);
       newDue = '';
       pendingPeak = null;
@@ -1935,6 +1931,7 @@
       const rec = { title, start, end, time: end ? '' : val('time'), color: Number(val('color')) || 0, shape: val('shape') === 'fill' ? 'fill' : 'arrow' };
       if (f.dataset.id && findEv(f.dataset.id)) Object.assign(findEv(f.dataset.id), rec);
       else state.events.push({ id: uid(), ...rec, created: today() });
+      state.calView.hiddenColors = state.calView.hiddenColors.filter((x) => x !== rec.color); // 숨긴 색으로 넣으면 다시 보이게
       calMonth = monthKey(start); calSel = start;
       closeDlg(); save(); render();
       return;
