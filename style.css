@@ -623,3 +623,4 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 .ev-dates .field { min-width: 0; }
 .ev-time .fl { padding: 2px 0 8px; }
 .ev-time input[type=time] { margin-top: 2px; }
+.mask { -webkit-text-security: disc; text-security: disc; }

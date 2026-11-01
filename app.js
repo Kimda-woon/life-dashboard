@@ -3,7 +3,7 @@
 
   /* ---------- 기본 도구 ---------- */
   const KEY = 'life-dashboard-v1';
-  const APP_VERSION = '2026.11.01.5'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
+  const APP_VERSION = '2026.11.01.6'; // 올릴 때마다 version.json 과 index.html 의 ?v= 도 같이 바꿈
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -146,7 +146,83 @@
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); }
     catch (e) { if (!saveWarned) { toast('저장이 안 돼요. 설정 → 내보내기로 백업해 주세요.'); saveWarned = true; } }
+    queueSync();
   }
+
+  /* ---------- 🤖 비서 연결: 기록을 내 비공개 GitHub 저장소에 자동으로 올림 ---------- */
+  // 토큰은 이 폰에만 따로 저장하고, 기록(state)·백업·기록 복사에는 절대 넣지 않음
+  const SYNC_KEY = 'life-dashboard-sync';
+  const SYNC_FILE = 'data/state.json';
+  const SYNC_WAIT = 20000; // 마지막으로 고친 뒤 이만큼 조용하면 올림 (저장소에 기록이 너무 많이 쌓이지 않게)
+  let sync = (() => {
+    try { return { on: false, repo: '', token: '', ...JSON.parse(localStorage.getItem(SYNC_KEY) || '{}') }; }
+    catch (e) { return { on: false, repo: '', token: '' }; }
+  })();
+  const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* 저장소를 못 쓰는 환경 */ } };
+  const syncReady = () => !!(sync.repo && sync.token);
+  let syncTimer = null, syncBusy = false, syncAgain = false;
+  const hashOf = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return h; };
+  const toB64 = (str) => { // 한글이 깨지지 않게 UTF-8로 바꾼 뒤 base64
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  const ghFetch = (path, opts = {}) => fetch(`https://api.github.com/repos/${sync.repo}/contents/${path}`, {
+    ...opts,
+    headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', Authorization: `Bearer ${sync.token}` },
+  });
+  const syncWhy = (code) => ({
+    401: '토큰이 맞지 않거나 기간이 끝났어요',
+    403: '권한이 없어요. 토큰에 이 저장소의 Contents 읽기·쓰기 권한이 있는지 확인해 주세요',
+    404: '저장소를 못 찾았어요. 이름과, 토큰의 저장소 선택을 확인해 주세요',
+  }[code] || `GitHub 오류 (${code})`);
+  const syncWhen = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  function syncStatus() {
+    if (!syncReady()) return '아직 연결 안 됐어요. 저장소와 토큰을 넣고 [지금 올리기]를 눌러 주세요.';
+    if (sync.lastErr) return `⚠️ ${sync.lastErr}`;
+    if (!sync.lastOk) return '연결 정보를 저장했어요. [지금 올리기]로 확인해 주세요.';
+    return `✅ ${syncWhen(sync.lastOk)}에 올렸어요${sync.on ? '' : ' (자동 올리기는 꺼져 있어요)'}`;
+  }
+  async function pushSync(force) {
+    if (!syncReady()) return { ok: false, msg: '저장소와 토큰을 먼저 넣어 주세요' };
+    if (syncBusy) { syncAgain = true; return { ok: true, msg: '올리는 중이에요' }; }
+    const body = JSON.stringify(state);
+    const h = `${body.length}:${hashOf(body)}`;
+    if (!force && h === sync.lastHash) return { ok: true, msg: '바뀐 게 없어요' };
+    syncBusy = true;
+    let res;
+    try {
+      const content = toB64(JSON.stringify({ app: 'life-dashboard', version: APP_VERSION, updated: new Date().toISOString(), state }));
+      const put = (sha) => ghFetch(SYNC_FILE, { method: 'PUT', body: JSON.stringify({ message: `기록 ${today()} ${new Date().toTimeString().slice(0, 5)}`, content, ...(sha ? { sha } : {}) }) });
+      let r = await put(sync.sha);
+      if (r.status === 409 || r.status === 422) { // 파일이 이미 있는데 sha가 없거나 낡았을 때: 지금 sha를 받아 한 번 더
+        const g = await ghFetch(SYNC_FILE);
+        r = await put(g.ok ? (await g.json()).sha : undefined);
+      }
+      if (!r.ok) throw new Error(syncWhy(r.status));
+      sync.sha = (await r.json()).content.sha;
+      sync.lastHash = h; sync.lastOk = new Date().toISOString(); sync.lastErr = '';
+      res = { ok: true, msg: '비서 저장소에 올렸어요' };
+    } catch (e) {
+      sync.lastErr = e instanceof TypeError ? '인터넷에 연결할 수 없어요' : e.message;
+      res = { ok: false, msg: sync.lastErr };
+    } finally { syncBusy = false; }
+    saveSync();
+    const st = $('#sync-status');
+    if (st) st.textContent = syncStatus();
+    if (syncAgain) { syncAgain = false; queueSync(); }
+    return res;
+  }
+  function queueSync() {
+    if (!sync.on || !syncReady()) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => { syncTimer = null; pushSync(); }, SYNC_WAIT);
+  }
+  // 앱을 닫거나 다른 앱으로 넘어갈 때 기다리던 게 있으면 바로 올림
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && syncTimer) { clearTimeout(syncTimer); syncTimer = null; pushSync(); }
+  });
 
   // 기간이 바뀌면(새 분기·새 달·새 주) 지난 내용을 참고용으로 넘기고 비움
   function rollPeriods() {
@@ -1220,6 +1296,28 @@
         <form class="set-add" data-form="work" style="margin-top:10px"><input name="work" placeholder="+ 작품 더하기" autocomplete="off"><button class="btn sm">추가</button></form>
       </section>
 
+      <section class="card" id="assist-set">
+        <div class="card-head"><h2>🤖 비서 연결</h2></div>
+        <p class="muted small">일정과 할 일을 <b>나만 보는 비공개 GitHub 저장소</b>에 자동으로 올려요. 비서(Claude)가 그걸 읽고 아침 브리핑 같은 걸 보내요. 토큰은 <b>이 폰에만</b> 저장되고, 백업이나 기록 복사에는 들어가지 않아요.</p>
+        <label class="field"><span>비공개 저장소 (예: 내아이디/life-dashboard-data)</span><input data-sync="repo" value="${esc(sync.repo)}" placeholder="아이디/저장소이름" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>토큰</span><input class="mask" data-sync="token" value="" placeholder="${sync.token ? '저장됨 ●●●● (바꾸려면 새로 붙여넣기)' : 'github_pat_…'}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+        <label class="fl" style="margin-top:6px"><input type="checkbox" data-sync-on ${sync.on ? 'checked' : ''}><span>고칠 때마다 자동으로 올리기</span></label>
+        <div class="row" style="margin-top:6px">
+          <button class="btn primary" data-act="sync-now">지금 올리기 · 연결 확인</button>
+          ${sync.token || sync.repo ? '<button class="btn ghost danger" data-act="sync-clear">연결 끊기</button>' : ''}
+        </div>
+        <p class="hint" id="sync-status">${esc(syncStatus())}</p>
+        <details style="margin-top:8px"><summary class="muted small">저장소와 토큰 만드는 법</summary>
+          <ol class="guide-steps">
+            <li>GitHub에서 새 저장소를 만들어요. <b>Private</b>로 하고 <b>Add a README</b>를 체크해요. (이름 예: life-dashboard-data)</li>
+            <li>GitHub → 내 프로필 → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</b></li>
+            <li><b>Repository access</b>는 <b>Only select repositories</b>로 방금 만든 저장소 하나만 고르고, <b>Permissions → Repository permissions → Contents</b>를 <b>Read and write</b>로 해요. 만료는 1년쯤으로 해요.</li>
+            <li>만들어진 <b>github_pat_…</b> 글자를 위 토큰 칸에 붙여넣고, 저장소 이름을 적은 뒤 <b>지금 올리기</b>를 눌러요.</li>
+          </ol>
+          <p class="hint">저장소에는 <b>data/state.json</b> 파일 하나가 만들어지고, 올릴 때마다 새 내용으로 바뀌어요. 토큰은 대화에 붙여 넣지 마세요.</p>
+        </details>
+      </section>
+
       <section class="card" id="transfer">
         <div class="card-head"><h2>📱 사파리 ↔ 홈 화면 앱 기록 옮기기</h2></div>
         <p class="muted small">아이폰은 <b>사파리</b>와 <b>홈 화면에 추가한 앱</b>이 기록을 따로 저장해요. 한쪽에 쓴 기록이 다른 쪽에서 안 보이면 이렇게 옮기세요.</p>
@@ -1593,6 +1691,24 @@
         break;
       }
       case 'go-transfer': go('settings'); $('#transfer')?.scrollIntoView({ block: 'start' }); return;
+      case 'sync-now': {
+        if (!sync.repo || !sync.token) { toast('저장소와 토큰을 먼저 넣어 주세요'); return; }
+        el.disabled = true; el.textContent = '올리는 중…';
+        const r = await pushSync(true);
+        if (r.ok && !sync.on) { sync.on = true; saveSync(); }
+        toast(r.ok ? '✅ 비서 저장소에 올렸어요' : `⚠️ ${r.msg}`);
+        render();
+        return;
+      }
+      case 'sync-clear': {
+        if (!await ask('연결을 끊을까요? 이 폰에 저장된 토큰이 지워져요. (저장소의 파일은 그대로 남아요)')) return;
+        clearTimeout(syncTimer); syncTimer = null;
+        sync = { on: false, repo: '', token: '' };
+        try { localStorage.removeItem(SYNC_KEY); } catch (e) { /* 무시 */ }
+        toast('연결을 끊었어요');
+        render();
+        return;
+      }
       case 'copy-state': {
         const text = TRANSFER_TAG + JSON.stringify(state);
         const done = () => toast('📋 복사했어요. 다른 쪽 설정 화면에 붙여넣으세요');
@@ -1701,6 +1817,20 @@
     const el = e.target;
     if (el.dataset.act === 'pick-cat') { newCat = el.value; return; }
     if (el.dataset.cal) { state.calView[el.dataset.cal] = el.checked; save(); render(); return; }
+    if (el.dataset.sync) {
+      const v = el.value.trim();
+      if (el.dataset.sync === 'repo') sync.repo = v.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+      else if (v) sync.token = v;
+      sync.lastHash = null; sync.sha = undefined; sync.lastErr = '';
+      saveSync(); render(); toast('저장했어요');
+      return;
+    }
+    if (el.dataset.syncOn !== undefined) {
+      if (el.checked && !syncReady()) { toast('저장소와 토큰을 먼저 넣어 주세요'); render(); return; }
+      sync.on = el.checked; saveSync(); render();
+      if (sync.on) queueSync();
+      return;
+    }
     if (el.name === 'hasTime') { const ti = el.form.elements.time; ti.hidden = !el.checked; if (el.checked && !ti.value) ti.value = '09:00'; return; }
     if (el.dataset.calColor !== undefined) {
       const i = Number(el.dataset.calColor);
